@@ -254,3 +254,41 @@ select {
     animation: none;
   }
 }
+
+/* Spinner for the running button */
+.spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(255, 247, 239, 0.45);
+  border-top-color: #fff7ef;
+  border-radius: 50%;
+  display: inline-block;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Shimmer skeleton while a backtest runs */
+.shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 252, 246, 0.7), transparent);
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
