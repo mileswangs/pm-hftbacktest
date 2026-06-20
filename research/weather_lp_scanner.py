@@ -44,6 +44,7 @@ WEATHER_KEYWORDS = (
 class RewardMarketRecord:
     condition_id: str
     slug: str
+    yes_token_id: str | None
     question: str
     event_slug: str | None
     event_title: str | None
@@ -276,6 +277,11 @@ def scan_reward_weather_markets(*, page_size: int, max_pages: int) -> list[Rewar
             RewardMarketRecord(
                 condition_id=cid,
                 slug=str(market.get("slug") or ""),
+                yes_token_id=(
+                    str((json.loads(market["clobTokenIds"])[0] if isinstance(market.get("clobTokenIds"), str) else (market.get("clobTokenIds") or [None])[0]))
+                    if market.get("clobTokenIds")
+                    else None
+                ),
                 question=str(market.get("question") or ""),
                 event_slug=event.get("slug"),
                 event_title=event.get("title"),
