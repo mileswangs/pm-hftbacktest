@@ -3,13 +3,20 @@ import type { AdapterKind, BacktestConfig } from '../services/types';
 import { getService } from '../services';
 import { useBacktestRuns } from '../hooks/useBacktestRuns';
 import { TopBar } from '../components/TopBar';
+import type { AppMode } from '../components/TopBar';
 import { HistorySidebar } from '../components/HistorySidebar';
 import { ConfigPanel } from '../components/ConfigPanel';
 import { ResultsPanel } from '../components/ResultsPanel';
 import { CompareView } from '../components/CompareView';
 import './Dashboard.css';
 
-export function Dashboard() {
+export function Dashboard({
+  mode,
+  onModeChange,
+}: {
+  mode: AppMode;
+  onModeChange: (mode: AppMode) => void;
+}) {
   const [adapter, setAdapter] = useState<AdapterKind>('mock');
   const service = useMemo(() => getService(adapter), [adapter]);
   const bt = useBacktestRuns(service);
@@ -26,7 +33,7 @@ export function Dashboard() {
 
   return (
     <div className="shell">
-      <TopBar adapter={adapter} onAdapterChange={setAdapter} />
+      <TopBar mode={mode} onModeChange={onModeChange} adapter={adapter} onAdapterChange={setAdapter} />
       <main className="grid">
         <div className="col-history">
           <HistorySidebar

@@ -7,11 +7,28 @@ export interface ChartSeries {
   color: string;
   axis?: 'left' | 'right'; // default 'left'
   dashed?: boolean;
+  opacity?: number;
   points: { x: number; y: number }[];
+}
+
+export interface ChartMarker {
+  x: number;
+  y: number;
+  color: string;
+  label?: string;
+}
+
+export interface ChartRule {
+  x: number;
+  color: string;
+  label?: string;
+  dashed?: boolean;
 }
 
 export interface LineChartProps {
   series: ChartSeries[];
+  markers?: ChartMarker[];
+  rules?: ChartRule[];
   height?: number;
   xFormat?: (x: number) => string;
   yFormat?: (y: number) => string;
@@ -35,6 +52,8 @@ function extent(values: number[]): [number, number] {
 
 export function LineChart({
   series,
+  markers = [],
+  rules = [],
   height = 280,
   xFormat = identity,
   yFormat = identity,
@@ -205,6 +224,34 @@ export function LineChart({
           <line x1={hoverX} x2={hoverX} y1={pad.t} y2={height - pad.b} stroke={CHART.axis} strokeWidth={1} strokeDasharray="3 3" opacity={0.7} />
         )}
 
+        {/* entry rules */}
+        {rules.map((rule) => (
+          <g key={`rule-${rule.x}-${rule.label ?? ''}`}>
+            <line
+              x1={sx(rule.x)}
+              x2={sx(rule.x)}
+              y1={pad.t}
+              y2={height - pad.b}
+              stroke={rule.color}
+              strokeWidth={1.25}
+              strokeDasharray={rule.dashed ? '5 4' : '2 3'}
+              opacity={0.85}
+            />
+            {rule.label ? (
+              <text
+                x={Math.min(width - pad.r - 2, sx(rule.x) + 4)}
+                y={pad.t + 12}
+                textAnchor="start"
+                fontSize={10}
+                fill={rule.color}
+                fontFamily="var(--font-mono)"
+              >
+                {rule.label}
+              </text>
+            ) : null}
+          </g>
+        ))}
+
         {/* series */}
         {series.map((s) => (
           <path
@@ -217,8 +264,27 @@ export function LineChart({
             strokeLinejoin="round"
             strokeLinecap="round"
             strokeDasharray={s.dashed ? '5 4' : undefined}
-            opacity={s.dashed ? 0.7 : 1}
+            opacity={s.opacity ?? (s.dashed ? 0.7 : 1)}
           />
+        ))}
+
+        {/* explicit markers */}
+        {markers.map((marker) => (
+          <g key={`marker-${marker.label ?? ''}-${marker.x}-${marker.y}`}>
+            <circle cx={sx(marker.x)} cy={syL(marker.y)} r={4} fill={marker.color} stroke="var(--surface)" strokeWidth={1.5} />
+            {marker.label ? (
+              <text
+                x={Math.min(width - pad.r - 2, sx(marker.x) + 6)}
+                y={Math.max(pad.t + 12, syL(marker.y) - 8)}
+                textAnchor="start"
+                fontSize={10}
+                fill={marker.color}
+                fontFamily="var(--font-mono)"
+              >
+                {marker.label}
+              </text>
+            ) : null}
+          </g>
         ))}
 
         {/* hover dots */}
