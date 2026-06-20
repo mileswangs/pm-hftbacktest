@@ -114,7 +114,7 @@
       "cityLabel": "Madrid",
       "path": "/data/weather/madrid.json",
       "anchorDate": "2026-06-19",
-      "days": 17,
+      "days": 96,
       "entryHours": [
         6.0,
         12.0,
@@ -123,9 +123,9 @@
         36.0
       ],
       "threshold": 0.5,
-      "eventCount": 17,
+      "eventCount": 93,
       "bestEntryHour": 36.0,
-      "bestTotalPnl": 3.6700000000000004
+      "bestTotalPnl": 6.980000000000002
     },
     {
       "citySlug": "paris",

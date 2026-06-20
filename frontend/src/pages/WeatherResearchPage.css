@@ -222,6 +222,12 @@
   gap: 10px;
 }
 
+.weather-backtest-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .weather-capacity-item {
   display: flex;
   flex-direction: column;
@@ -239,6 +245,37 @@
   margin: 10px 0 0;
   font-size: 12px;
   line-height: 1.45;
+}
+
+.weather-event-table-wrap {
+  overflow: auto;
+}
+
+.weather-event-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.weather-event-table th,
+.weather-event-table td {
+  padding: 10px 8px;
+  border-top: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.weather-event-table thead th {
+  border-top: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.weather-event-table tbody tr {
+  cursor: pointer;
+}
+
+.weather-event-table tbody tr.active {
+  background: var(--accent-wash);
 }
 
 .weather-run-row {
@@ -284,6 +321,7 @@
   .weather-hero-metrics,
   .weather-detail-grid,
   .weather-research-grid,
+  .weather-backtest-summary,
   .weather-capacity-grid,
   .weather-exec-grid {
     grid-template-columns: 1fr;

@@ -32,6 +32,44 @@ type OutcomeResearchRow = {
   move1hAfterEntry: number | null;
 };
 
+type EventBacktestRow = {
+  eventSlug: string;
+  date: string;
+  winnerLabel: string | null;
+  entryHours: number;
+  pnl: number;
+  cumulativePnl: number;
+  didHit: boolean;
+  selectedLabels: string[];
+  selectedProbabilitySum: number;
+  selectionMode: string;
+  reason: string;
+};
+
+type ExecutionPolicy = {
+  slippagePerLeg: number;
+  feePerLeg: number;
+  maxStaleMinutes: number;
+  minUpdates6h: number;
+};
+
+type ExecutionEventRow = {
+  eventSlug: string;
+  date: string;
+  rawPnl: number;
+  conservativePnl: number;
+  cumulativeRawPnl: number;
+  cumulativeConservativePnl: number;
+  selectedProbabilitySum: number;
+  conservativeCost: number;
+  didHit: boolean;
+  selectedLabels: string[];
+  blockedByPolicy: boolean;
+  blockReasons: string[];
+  entryTimestamp: number;
+  endTimestamp: number;
+};
+
 function outcomeColor(
   outcome: WeatherOutcome,
   selectedIndex: number,
@@ -189,6 +227,135 @@ function buildAlphaNotes(dataset: WeatherDataset | null): string[] {
   return notes.slice(0, 3);
 }
 
+function buildEventBacktestRows(dataset: WeatherDataset | null, entryHours: number | null): EventBacktestRow[] {
+  if (!dataset || entryHours == null) return [];
+  let cumulative = 0;
+  return dataset.events
+    .map((event) => {
+      const run = findRun(event, entryHours);
+      if (!run) return null;
+      cumulative += run.pnl;
+      return {
+        eventSlug: event.eventSlug,
+        date: event.date,
+        winnerLabel: event.winnerLabel,
+        entryHours: run.entryHours,
+        pnl: run.pnl,
+        cumulativePnl: cumulative,
+        didHit: run.didHit,
+        selectedLabels: run.selectedLabels,
+        selectedProbabilitySum: run.selectedProbabilitySum,
+        selectionMode: run.selectionMode,
+        reason: run.reason,
+      };
+    })
+    .filter((row): row is EventBacktestRow => row != null);
+}
+
+function buildResearchRowsForRun(selectedEvent: WeatherEvent | null, selectedRun: WeatherRun | null): OutcomeResearchRow[] {
+  if (!selectedEvent || !selectedRun) return [];
+  return selectedEvent.outcomes
+    .map((outcome) => {
+      const directIdx = selectedRun.selectedLabels.indexOf(outcome.label);
+      const lastPoint = lastPointAtOrBefore(outcome, selectedRun.entryTimestamp);
+      return {
+        outcome,
+        entryProb: directIdx >= 0 ? selectedRun.selectedPrices[directIdx] ?? null : lastPoint?.p ?? null,
+        selected: directIdx >= 0,
+        staleMinutes: lastPoint ? (selectedRun.entryTimestamp - lastPoint.t) / 60000 : null,
+        updates6h: countUpdatesWithin(outcome, selectedRun.entryTimestamp - 6 * 60 * 60 * 1000, selectedRun.entryTimestamp),
+        move1hAfterEntry: maxAbsMoveAfter(outcome, selectedRun.entryTimestamp, 60 * 60 * 1000),
+      };
+    })
+    .sort((a, b) => (b.entryProb ?? -1) - (a.entryProb ?? -1));
+}
+
+function buildExecutionRows(
+  dataset: WeatherDataset | null,
+  entryHours: number | null,
+  policy: ExecutionPolicy,
+): ExecutionEventRow[] {
+  if (!dataset || entryHours == null) return [];
+  let cumulativeRawPnl = 0;
+  let cumulativeConservativePnl = 0;
+
+  return dataset.events
+    .map((event) => {
+      const run = findRun(event, entryHours);
+      if (!run) return null;
+
+      const researchRows = buildResearchRowsForRun(event, run).filter((row) => row.selected);
+      const blockReasons: string[] = [];
+      if (run.selectedLabels.length > 0) {
+        for (const row of researchRows) {
+          if (row.staleMinutes == null || row.staleMinutes > policy.maxStaleMinutes) {
+            blockReasons.push(`${row.outcome.label} stale ${fmtMaybe(row.staleMinutes, 1)}m`);
+          }
+          if (row.updates6h < policy.minUpdates6h) {
+            blockReasons.push(`${row.outcome.label} updates6h=${row.updates6h}`);
+          }
+        }
+      }
+
+      const blockedByPolicy = run.selectedLabels.length > 0 && blockReasons.length > 0;
+      const legs = run.selectedLabels.length;
+      const friction = legs * (policy.slippagePerLeg + policy.feePerLeg);
+      const conservativeCost = run.selectedProbabilitySum + friction;
+      const conservativePnl =
+        run.selectedLabels.length === 0 || blockedByPolicy
+          ? 0
+          : (run.didHit ? 1 : 0) - conservativeCost;
+
+      cumulativeRawPnl += run.pnl;
+      cumulativeConservativePnl += conservativePnl;
+
+      return {
+        eventSlug: event.eventSlug,
+        date: event.date,
+        rawPnl: run.pnl,
+        conservativePnl,
+        cumulativeRawPnl,
+        cumulativeConservativePnl,
+        selectedProbabilitySum: run.selectedProbabilitySum,
+        conservativeCost,
+        didHit: run.didHit,
+        selectedLabels: run.selectedLabels,
+        blockedByPolicy,
+        blockReasons,
+        entryTimestamp: run.entryTimestamp,
+        endTimestamp: new Date(event.endTimeUtc).getTime(),
+      };
+    })
+    .filter((row): row is ExecutionEventRow => row != null);
+}
+
+function computeMaxDrawdown(rows: ExecutionEventRow[], key: 'cumulativeRawPnl' | 'cumulativeConservativePnl'): number {
+  let peak = 0;
+  let maxDrawdown = 0;
+  for (const row of rows) {
+    peak = Math.max(peak, row[key]);
+    maxDrawdown = Math.max(maxDrawdown, peak - row[key]);
+  }
+  return maxDrawdown;
+}
+
+function computeMaxConcurrentCapital(rows: ExecutionEventRow[]): number {
+  const events: Array<{ ts: number; delta: number }> = [];
+  for (const row of rows) {
+    if (row.selectedLabels.length === 0 || row.blockedByPolicy) continue;
+    events.push({ ts: row.entryTimestamp, delta: row.conservativeCost });
+    events.push({ ts: row.endTimestamp, delta: -row.conservativeCost });
+  }
+  events.sort((a, b) => a.ts - b.ts || a.delta - b.delta);
+  let current = 0;
+  let max = 0;
+  for (const event of events) {
+    current += event.delta;
+    max = Math.max(max, current);
+  }
+  return max;
+}
+
 async function loadJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) {
@@ -220,6 +387,10 @@ export function WeatherResearchPage({
   const [daysInput, setDaysInput] = useState('17');
   const [entryHoursInput, setEntryHoursInput] = useState('6,12,18,24,36');
   const [thresholdInput, setThresholdInput] = useState('0.5');
+  const [slippageInput, setSlippageInput] = useState('0.015');
+  const [feeInput, setFeeInput] = useState('0.005');
+  const [maxStaleMinutesInput, setMaxStaleMinutesInput] = useState('90');
+  const [minUpdatesInput, setMinUpdatesInput] = useState('3');
 
   function applyDataset(payload: WeatherDataset, sourceLabel: string, progressMessage: string) {
     setDataset(payload);
@@ -381,24 +552,74 @@ export function WeatherResearchPage({
   );
 
   const alphaNotes = useMemo(() => buildAlphaNotes(dataset), [dataset]);
+  const eventRows = useMemo(() => buildEventBacktestRows(dataset, selectedEntryHours), [dataset, selectedEntryHours]);
+  const executionPolicy = useMemo<ExecutionPolicy>(
+    () => ({
+      slippagePerLeg: Number.isFinite(Number(slippageInput)) ? Number(slippageInput) : 0.015,
+      feePerLeg: Number.isFinite(Number(feeInput)) ? Number(feeInput) : 0.005,
+      maxStaleMinutes: Number.isFinite(Number(maxStaleMinutesInput)) ? Number(maxStaleMinutesInput) : 90,
+      minUpdates6h: Number.isFinite(Number(minUpdatesInput)) ? Number(minUpdatesInput) : 3,
+    }),
+    [slippageInput, feeInput, maxStaleMinutesInput, minUpdatesInput],
+  );
 
-  const researchRows = useMemo<OutcomeResearchRow[]>(() => {
-    if (!selectedEvent || !selectedRun) return [];
-    return selectedEvent.outcomes
-      .map((outcome) => {
-        const directIdx = selectedRun.selectedLabels.indexOf(outcome.label);
-        const lastPoint = lastPointAtOrBefore(outcome, selectedRun.entryTimestamp);
-        return {
-          outcome,
-          entryProb: directIdx >= 0 ? selectedRun.selectedPrices[directIdx] ?? null : lastPoint?.p ?? null,
-          selected: directIdx >= 0,
-          staleMinutes: lastPoint ? (selectedRun.entryTimestamp - lastPoint.t) / 60000 : null,
-          updates6h: countUpdatesWithin(outcome, selectedRun.entryTimestamp - 6 * 60 * 60 * 1000, selectedRun.entryTimestamp),
-          move1hAfterEntry: maxAbsMoveAfter(outcome, selectedRun.entryTimestamp, 60 * 60 * 1000),
-        };
-      })
-      .sort((a, b) => (b.entryProb ?? -1) - (a.entryProb ?? -1));
-  }, [selectedEvent, selectedRun]);
+  const backtestOverviewSeries = useMemo<ChartSeries[]>(() => {
+    if (eventRows.length === 0) return [];
+    return [
+      {
+        label: 'event pnl',
+        color: '#9a6b1f',
+        dashed: true,
+        opacity: 0.75,
+        points: eventRows.map((row, index) => ({ x: index, y: row.pnl })),
+      },
+      {
+        label: 'cumulative pnl',
+        color: CHART.position,
+        points: eventRows.map((row, index) => ({ x: index, y: row.cumulativePnl })),
+      },
+    ];
+  }, [eventRows]);
+
+  const executionRows = useMemo(
+    () => buildExecutionRows(dataset, selectedEntryHours, executionPolicy),
+    [dataset, selectedEntryHours, executionPolicy],
+  );
+
+  const executionSummary = useMemo(() => {
+    const traded = executionRows.filter((row) => row.selectedLabels.length > 0);
+    const passed = traded.filter((row) => !row.blockedByPolicy);
+    return {
+      rawTotal: executionRows.at(-1)?.cumulativeRawPnl ?? 0,
+      conservativeTotal: executionRows.at(-1)?.cumulativeConservativePnl ?? 0,
+      blockedTrades: traded.length - passed.length,
+      passedTrades: passed.length,
+      rawDrawdown: computeMaxDrawdown(executionRows, 'cumulativeRawPnl'),
+      conservativeDrawdown: computeMaxDrawdown(executionRows, 'cumulativeConservativePnl'),
+      maxConcurrentCapital: computeMaxConcurrentCapital(executionRows),
+      avgConservativeCost: passed.length > 0 ? passed.reduce((acc, row) => acc + row.conservativeCost, 0) / passed.length : 0,
+    };
+  }, [executionRows]);
+
+  const executionOverviewSeries = useMemo<ChartSeries[]>(() => {
+    if (executionRows.length === 0) return [];
+    return [
+      {
+        label: 'raw cumulative pnl',
+        color: '#9a6b1f',
+        dashed: true,
+        opacity: 0.78,
+        points: executionRows.map((row, index) => ({ x: index, y: row.cumulativeRawPnl })),
+      },
+      {
+        label: 'conservative cumulative pnl',
+        color: CHART.position,
+        points: executionRows.map((row, index) => ({ x: index, y: row.cumulativeConservativePnl })),
+      },
+    ];
+  }, [executionRows]);
+
+  const researchRows = useMemo<OutcomeResearchRow[]>(() => buildResearchRowsForRun(selectedEvent, selectedRun), [selectedEvent, selectedRun]);
 
   const selectedResearchRows = useMemo(() => researchRows.filter((row) => row.selected), [researchRows]);
 
@@ -527,7 +748,7 @@ export function WeatherResearchPage({
                     <strong>{totals.totalTrades}</strong>
                   </div>
                   <div>
-                    <span className="eyebrow">Grid PnL</span>
+                    <span className="eyebrow">Cumulative PnL</span>
                     <strong className={totals.totalPnl >= 0 ? 'pos' : 'neg'}>{totals.totalPnl.toFixed(3)}</strong>
                   </div>
                 </div>
@@ -608,6 +829,22 @@ export function WeatherResearchPage({
                   <span className="field-label">Threshold</span>
                   <input className="input mono" type="number" min={0.01} max={0.99} step={0.01} value={thresholdInput} onChange={(e) => setThresholdInput(e.target.value)} />
                 </label>
+                <label>
+                  <span className="field-label">Slip / leg</span>
+                  <input className="input mono" type="number" min={0} step={0.001} value={slippageInput} onChange={(e) => setSlippageInput(e.target.value)} />
+                </label>
+                <label>
+                  <span className="field-label">Fee / leg</span>
+                  <input className="input mono" type="number" min={0} step={0.001} value={feeInput} onChange={(e) => setFeeInput(e.target.value)} />
+                </label>
+                <label>
+                  <span className="field-label">Max stale min</span>
+                  <input className="input mono" type="number" min={0} step={1} value={maxStaleMinutesInput} onChange={(e) => setMaxStaleMinutesInput(e.target.value)} />
+                </label>
+                <label>
+                  <span className="field-label">Min updates 6h</span>
+                  <input className="input mono" type="number" min={0} step={1} value={minUpdatesInput} onChange={(e) => setMinUpdatesInput(e.target.value)} />
+                </label>
               </div>
               <div style={{ display: 'flex', gap: 10, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                 <button className="btn btn-primary" type="button" onClick={submitGenerator} disabled={status === 'loading'}>
@@ -637,6 +874,10 @@ export function WeatherResearchPage({
                     setDaysInput('17');
                     setEntryHoursInput('6,12,18,24,36');
                     setThresholdInput('0.5');
+                    setSlippageInput('0.015');
+                    setFeeInput('0.005');
+                    setMaxStaleMinutesInput('90');
+                    setMinUpdatesInput('3');
                     void loadBundledDataset('chengdu').catch(() => undefined);
                   }}
                 >
@@ -675,16 +916,16 @@ export function WeatherResearchPage({
                             setStatus('error');
                           });
                         }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                          <strong>{entry.cityLabel}</strong>
-                          <span className={`mono ${entry.bestTotalPnl >= 0 ? 'pos' : 'neg'}`}>{entry.bestTotalPnl.toFixed(2)}</span>
-                        </div>
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                            <strong>{entry.cityLabel}</strong>
+                            <span className={`mono ${entry.bestTotalPnl >= 0 ? 'pos' : 'neg'}`}>{entry.bestTotalPnl.toFixed(2)}</span>
+                          </div>
                         <div className="muted" style={{ fontSize: 12 }}>
-                          best {entry.bestEntryHour ?? '-'}h · {entry.eventCount} days
+                          best {entry.bestEntryHour ?? '-'}h · raw cum pnl {entry.bestTotalPnl.toFixed(2)}
                         </div>
-                      </button>
-                    );
+                        </button>
+                      );
                   })}
                 </div>
               </div>
@@ -714,7 +955,7 @@ export function WeatherResearchPage({
                             {item.totalPnl.toFixed(3)}
                           </div>
                           <div className="muted" style={{ fontSize: 12 }}>
-                            hit {fmtPct(item.hitRate, 1)} · avg {item.avgPnl.toFixed(3)}
+                            cum pnl · hit {fmtPct(item.hitRate, 1)} · avg {item.avgPnl.toFixed(3)}
                           </div>
                         </button>
                       );
@@ -787,7 +1028,7 @@ export function WeatherResearchPage({
                 </div>
                 <div className="weather-hero-metrics">
                   <div className="card weather-mini-metric">
-                    <span className="eyebrow">Run PnL</span>
+                    <span className="eyebrow">Event PnL</span>
                     <strong className={`mono ${selectedRun.pnl >= 0 ? 'pos' : 'neg'}`}>{selectedRun.pnl.toFixed(3)}</strong>
                   </div>
                   <div className="card weather-mini-metric">
@@ -799,11 +1040,185 @@ export function WeatherResearchPage({
                     <strong>{selectedRun.didHit ? 'Yes' : 'No'}</strong>
                   </div>
                   <div className="card weather-mini-metric">
-                    <span className="eyebrow">Hour PnL</span>
+                    <span className="eyebrow">Hour Cum PnL</span>
                     <strong className={`mono ${entrySummary.totalPnl >= 0 ? 'pos' : 'neg'}`}>{entrySummary.totalPnl.toFixed(3)}</strong>
                   </div>
                 </div>
               </div>
+
+              <section className="card" style={{ padding: 16 }}>
+                <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>
+                  <div>
+                    <div className="eyebrow">Backtest Overview</div>
+                    <h3 style={{ fontSize: 16 }}>Whole-window results for {selectedEntryHours}h entry</h3>
+                  </div>
+                  <div className="muted" style={{ fontSize: 12, maxWidth: 420, textAlign: 'right' }}>
+                    `3.67` means cumulative profit of <strong>$3.67</strong> across the tested events, assuming each selected bucket is bought with 1 share notionally and held to settlement. It is not `3.67x`.
+                  </div>
+                </header>
+                <div className="weather-backtest-summary">
+                  <div className="weather-capacity-item">
+                    <span className="eyebrow">Cumulative PnL</span>
+                    <strong className={entrySummary.totalPnl >= 0 ? 'pos' : 'neg'}>{entrySummary.totalPnl.toFixed(3)}</strong>
+                    <span className="muted">USD-equivalent per 1-share sizing</span>
+                  </div>
+                  <div className="weather-capacity-item">
+                    <span className="eyebrow">Avg Event PnL</span>
+                    <strong className={entrySummary.avgPnl >= 0 ? 'pos' : 'neg'}>{entrySummary.avgPnl.toFixed(3)}</strong>
+                    <span className="muted">mean across traded events</span>
+                  </div>
+                  <div className="weather-capacity-item">
+                    <span className="eyebrow">Hit Rate</span>
+                    <strong>{fmtPct(entrySummary.hitRate, 1)}</strong>
+                    <span className="muted">{entrySummary.tradedCount} traded events</span>
+                  </div>
+                  <div className="weather-capacity-item">
+                    <span className="eyebrow">Avg Cost</span>
+                    <strong>{fmtPct(entrySummary.avgProbabilitySum, 1)}</strong>
+                    <span className="muted">average implied probability paid</span>
+                  </div>
+                </div>
+                <div style={{ marginTop: 14 }}>
+                  <LineChart
+                    series={backtestOverviewSeries}
+                    markers={
+                      selectedEvent
+                        ? [
+                            {
+                              x: eventRows.findIndex((row) => row.eventSlug === selectedEvent.eventSlug),
+                              y: eventRows.find((row) => row.eventSlug === selectedEvent.eventSlug)?.cumulativePnl ?? 0,
+                              color: CHART.text,
+                              label: 'selected',
+                            },
+                          ].filter((marker) => marker.x >= 0)
+                        : []
+                    }
+                    height={280}
+                    xFormat={(value) => {
+                      const row = eventRows[Math.round(value)];
+                      return row ? fmtDateShort(row.date) : '';
+                    }}
+                    yFormat={(value) => value.toFixed(2)}
+                  />
+                </div>
+              </section>
+
+              <section className="card" style={{ padding: 16 }}>
+                <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>
+                  <div>
+                    <div className="eyebrow">Execution Reality Check</div>
+                    <h3 style={{ fontSize: 16 }}>Conservative scenario after friction and stale-data filters</h3>
+                  </div>
+                  <div className="muted" style={{ fontSize: 12, maxWidth: 440, textAlign: 'right' }}>
+                    Conservative PnL = raw entry cost + `slippage/leg` + `fee/leg`, and the trade is skipped if any selected bucket violates `max stale min` or `min updates 6h`.
+                  </div>
+                </header>
+                <div className="weather-backtest-summary">
+                  <div className="weather-capacity-item">
+                    <span className="eyebrow">Raw Cum PnL</span>
+                    <strong className={executionSummary.rawTotal >= 0 ? 'pos' : 'neg'}>{executionSummary.rawTotal.toFixed(3)}</strong>
+                    <span className="muted">same as current backtest</span>
+                  </div>
+                  <div className="weather-capacity-item">
+                    <span className="eyebrow">Conservative Cum PnL</span>
+                    <strong className={executionSummary.conservativeTotal >= 0 ? 'pos' : 'neg'}>{executionSummary.conservativeTotal.toFixed(3)}</strong>
+                    <span className="muted">after friction and filters</span>
+                  </div>
+                  <div className="weather-capacity-item">
+                    <span className="eyebrow">Blocked Trades</span>
+                    <strong>{executionSummary.blockedTrades}</strong>
+                    <span className="muted">out of {entrySummary.tradedCount}</span>
+                  </div>
+                  <div className="weather-capacity-item">
+                    <span className="eyebrow">Max Drawdown</span>
+                    <strong className={executionSummary.conservativeDrawdown > 0 ? 'neg' : ''}>{executionSummary.conservativeDrawdown.toFixed(3)}</strong>
+                    <span className="muted">conservative curve</span>
+                  </div>
+                </div>
+                <div className="weather-capacity-grid" style={{ marginTop: 10 }}>
+                  <div className="weather-capacity-item">
+                    <span className="eyebrow">Max Concurrent Capital</span>
+                    <strong>{executionSummary.maxConcurrentCapital.toFixed(3)}</strong>
+                  </div>
+                  <div className="weather-capacity-item">
+                    <span className="eyebrow">Avg Conservative Cost</span>
+                    <strong>{fmtPct(executionSummary.avgConservativeCost, 1)}</strong>
+                  </div>
+                  <div className="weather-capacity-item">
+                    <span className="eyebrow">Passed Trades</span>
+                    <strong>{executionSummary.passedTrades}</strong>
+                  </div>
+                </div>
+                <div style={{ marginTop: 14 }}>
+                  <LineChart
+                    series={executionOverviewSeries}
+                    markers={
+                      selectedEvent
+                        ? [
+                            {
+                              x: executionRows.findIndex((row) => row.eventSlug === selectedEvent.eventSlug),
+                              y: executionRows.find((row) => row.eventSlug === selectedEvent.eventSlug)?.cumulativeConservativePnl ?? 0,
+                              color: CHART.text,
+                              label: 'selected',
+                            },
+                          ].filter((marker) => marker.x >= 0)
+                        : []
+                    }
+                    height={260}
+                    xFormat={(value) => {
+                      const row = executionRows[Math.round(value)];
+                      return row ? fmtDateShort(row.date) : '';
+                    }}
+                    yFormat={(value) => value.toFixed(2)}
+                  />
+                </div>
+              </section>
+
+              <section className="card" style={{ padding: 16 }}>
+                <div className="eyebrow" style={{ marginBottom: 8 }}>
+                  Event Timeline
+                </div>
+                <div className="weather-event-table-wrap">
+                  <table className="weather-event-table">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Raw</th>
+                        <th>Cons.</th>
+                        <th>Cons. Cum</th>
+                        <th>Hit</th>
+                        <th>Selection</th>
+                        <th>Raw Cost</th>
+                        <th>Cons. Cost</th>
+                        <th>Policy</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...executionRows].reverse().map((row) => {
+                        const active = row.eventSlug === selectedEvent.eventSlug;
+                        return (
+                          <tr
+                            key={row.eventSlug}
+                            className={active ? 'active' : undefined}
+                            onClick={() => setSelectedEventSlug(row.eventSlug)}
+                            title={row.blockReasons.join(' | ') || 'passed policy'}
+                          >
+                            <td className="mono">{fmtDateShort(row.date)}</td>
+                            <td className={`mono ${row.rawPnl >= 0 ? 'pos' : 'neg'}`}>{row.rawPnl.toFixed(3)}</td>
+                            <td className={`mono ${row.conservativePnl >= 0 ? 'pos' : 'neg'}`}>{row.conservativePnl.toFixed(3)}</td>
+                            <td className={`mono ${row.cumulativeConservativePnl >= 0 ? 'pos' : 'neg'}`}>{row.cumulativeConservativePnl.toFixed(3)}</td>
+                            <td>{row.didHit ? 'Yes' : 'No'}</td>
+                            <td>{row.selectedLabels.join(' + ') || 'skip'}</td>
+                            <td className="mono">{fmtPct(row.selectedProbabilitySum, 1)}</td>
+                            <td className="mono">{fmtPct(row.conservativeCost, 1)}</td>
+                            <td>{row.blockedByPolicy ? row.blockReasons.join(', ') : 'pass'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
 
               <div className="weather-research-grid">
                 <section className="card" style={{ padding: 16 }}>

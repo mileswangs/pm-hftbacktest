@@ -66,6 +66,14 @@ function buildEventSlug(citySlug: string, targetDate: Date): string {
   return `highest-temperature-in-${citySlug}-on-${month}-${day}-${year}`;
 }
 
+function parseTargetDateFromSlug(slug: string, fallbackIso: string): string {
+  const match = slug.match(/-on-([a-z]+)-(\d{1,2})-(\d{4})$/);
+  if (!match) return fallbackIso;
+  const [, monthText, dayText, yearText] = match;
+  const parsed = new Date(`${monthText} ${dayText}, ${yearText} 00:00:00 UTC`);
+  return Number.isNaN(parsed.getTime()) ? fallbackIso : parsed.toISOString().slice(0, 10);
+}
+
 function sortKeyForLabel(label: string): number {
   const match = label.match(/-?\d+/);
   if (!match) return Number.POSITIVE_INFINITY;
@@ -311,7 +319,7 @@ export async function buildWeatherDataset(options: BuildOptions): Promise<Weathe
     }
 
     events.push({
-      date: endTime.toISOString().slice(0, 10),
+      date: parseTargetDateFromSlug(event.slug, endTime.toISOString().slice(0, 10)),
       eventSlug: event.slug,
       eventTitle: event.title,
       endTimeUtc: endTime.toISOString(),

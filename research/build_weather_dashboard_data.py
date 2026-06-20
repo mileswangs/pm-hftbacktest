@@ -5,6 +5,7 @@ import argparse
 import bisect
 import datetime as dt
 import json
+import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -74,6 +75,16 @@ def _market_stats_payload(market: dict[str, Any]) -> dict[str, float | None]:
         "orderMinSize": _number_or_none(market.get("orderMinSize")),
         "orderPriceMinTickSize": _number_or_none(market.get("orderPriceMinTickSize")),
     }
+
+
+def _event_target_date(event: dict[str, Any], end_dt: dt.datetime) -> str:
+    slug = str(event.get("slug") or "")
+    match = re.search(r"-on-([a-z]+)-(\d{1,2})-(\d{4})$", slug)
+    if not match:
+        return end_dt.date().isoformat()
+    month_name, day_text, year_text = match.groups()
+    parsed = dt.datetime.strptime(f"{month_name} {day_text} {year_text}", "%B %d %Y")
+    return parsed.date().isoformat()
 
 
 def _output_default_path() -> Path:
@@ -212,7 +223,7 @@ def build_weather_dataset(
 
         events_payload.append(
             {
-                "date": end_dt.date().isoformat(),
+                "date": _event_target_date(event, end_dt),
                 "eventSlug": str(event["slug"]),
                 "eventTitle": str(event["title"]),
                 "endTimeUtc": end_dt.isoformat(),
