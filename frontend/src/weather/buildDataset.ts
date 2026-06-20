@@ -20,6 +20,17 @@ type EventResponse = {
     clobTokenIds: string | string[];
     outcomePrices: string | string[];
     resolutionSource?: string | null;
+    volume?: string | number | null;
+    volume24hr?: string | number | null;
+    liquidity?: string | number | null;
+    spread?: string | number | null;
+    bestBid?: string | number | null;
+    bestAsk?: string | number | null;
+    lastTradePrice?: string | number | null;
+    rewardsMinSize?: string | number | null;
+    rewardsMaxSpread?: string | number | null;
+    orderMinSize?: string | number | null;
+    orderPriceMinTickSize?: string | number | null;
   }>;
 };
 
@@ -40,6 +51,12 @@ const historyCache = new Map<string, HistoryPoint[]>();
 
 function normalizeJsonField<T>(raw: T | string): T {
   return typeof raw === 'string' ? (JSON.parse(raw) as T) : raw;
+}
+
+function numberOrNull(value: string | number | null | undefined): number | null {
+  if (value == null || value === '') return null;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function buildEventSlug(citySlug: string, targetDate: Date): string {
@@ -227,6 +244,19 @@ export async function buildWeatherDataset(options: BuildOptions): Promise<Weathe
           marketSlug: market.slug,
           yesTokenId: tokenId,
           isWinner: market.groupItemTitle === winner,
+          marketStats: {
+            volume: numberOrNull(market.volume),
+            volume24hr: numberOrNull(market.volume24hr),
+            liquidity: numberOrNull(market.liquidity),
+            spread: numberOrNull(market.spread),
+            bestBid: numberOrNull(market.bestBid),
+            bestAsk: numberOrNull(market.bestAsk),
+            lastTradePrice: numberOrNull(market.lastTradePrice),
+            rewardsMinSize: numberOrNull(market.rewardsMinSize),
+            rewardsMaxSpread: numberOrNull(market.rewardsMaxSpread),
+            orderMinSize: numberOrNull(market.orderMinSize),
+            orderPriceMinTickSize: numberOrNull(market.orderPriceMinTickSize),
+          },
           points: history.map(([t, p]) => ({ t: t * 1000, p })),
         };
       }),

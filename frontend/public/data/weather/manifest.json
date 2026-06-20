@@ -1,0 +1,257 @@
+{
+  "generatedAtUtc": "2026-06-20T02:44:31.163017+00:00",
+  "cities": [
+    {
+      "citySlug": "beijing",
+      "cityLabel": "Beijing",
+      "path": "/data/weather/beijing.json",
+      "anchorDate": "2026-06-19",
+      "days": 17,
+      "entryHours": [
+        6.0,
+        12.0,
+        18.0,
+        24.0,
+        36.0
+      ],
+      "threshold": 0.5,
+      "eventCount": 17,
+      "bestEntryHour": 6.0,
+      "bestTotalPnl": -1.9345000000000008
+    },
+    {
+      "citySlug": "chengdu",
+      "cityLabel": "Chengdu",
+      "path": "/data/weather/chengdu.json",
+      "anchorDate": "2026-06-19",
+      "days": 17,
+      "entryHours": [
+        6.0,
+        12.0,
+        18.0,
+        24.0,
+        36.0
+      ],
+      "threshold": 0.5,
+      "eventCount": 17,
+      "bestEntryHour": 12.0,
+      "bestTotalPnl": 2.55
+    },
+    {
+      "citySlug": "guangzhou",
+      "cityLabel": "Guangzhou",
+      "path": "/data/weather/guangzhou.json",
+      "anchorDate": "2026-06-19",
+      "days": 17,
+      "entryHours": [
+        6.0,
+        12.0,
+        18.0,
+        24.0,
+        36.0
+      ],
+      "threshold": 0.5,
+      "eventCount": 17,
+      "bestEntryHour": 12.0,
+      "bestTotalPnl": 0.3800000000000001
+    },
+    {
+      "citySlug": "hong-kong",
+      "cityLabel": "Hong Kong",
+      "path": "/data/weather/hong-kong.json",
+      "anchorDate": "2026-06-19",
+      "days": 17,
+      "entryHours": [
+        6.0,
+        12.0,
+        18.0,
+        24.0,
+        36.0
+      ],
+      "threshold": 0.5,
+      "eventCount": 17,
+      "bestEntryHour": 24.0,
+      "bestTotalPnl": 2.98
+    },
+    {
+      "citySlug": "london",
+      "cityLabel": "London",
+      "path": "/data/weather/london.json",
+      "anchorDate": "2026-06-19",
+      "days": 17,
+      "entryHours": [
+        6.0,
+        12.0,
+        18.0,
+        24.0,
+        36.0
+      ],
+      "threshold": 0.5,
+      "eventCount": 17,
+      "bestEntryHour": 36.0,
+      "bestTotalPnl": -2.025
+    },
+    {
+      "citySlug": "los-angeles",
+      "cityLabel": "Los Angeles",
+      "path": "/data/weather/los-angeles.json",
+      "anchorDate": "2026-06-19",
+      "days": 17,
+      "entryHours": [
+        6.0,
+        12.0,
+        18.0,
+        24.0,
+        36.0
+      ],
+      "threshold": 0.5,
+      "eventCount": 16,
+      "bestEntryHour": 6.0,
+      "bestTotalPnl": 1.5599999999999998
+    },
+    {
+      "citySlug": "madrid",
+      "cityLabel": "Madrid",
+      "path": "/data/weather/madrid.json",
+      "anchorDate": "2026-06-19",
+      "days": 17,
+      "entryHours": [
+        6.0,
+        12.0,
+        18.0,
+        24.0,
+        36.0
+      ],
+      "threshold": 0.5,
+      "eventCount": 17,
+      "bestEntryHour": 36.0,
+      "bestTotalPnl": 3.6700000000000004
+    },
+    {
+      "citySlug": "paris",
+      "cityLabel": "Paris",
+      "path": "/data/weather/paris.json",
+      "anchorDate": "2026-06-19",
+      "days": 17,
+      "entryHours": [
+        6.0,
+        12.0,
+        18.0,
+        24.0,
+        36.0
+      ],
+      "threshold": 0.5,
+      "eventCount": 17,
+      "bestEntryHour": 36.0,
+      "bestTotalPnl": 2.0199999999999996
+    },
+    {
+      "citySlug": "seoul",
+      "cityLabel": "Seoul",
+      "path": "/data/weather/seoul.json",
+      "anchorDate": "2026-06-19",
+      "days": 17,
+      "entryHours": [
+        6.0,
+        12.0,
+        18.0,
+        24.0,
+        36.0
+      ],
+      "threshold": 0.5,
+      "eventCount": 17,
+      "bestEntryHour": 36.0,
+      "bestTotalPnl": 2.1050000000000004
+    },
+    {
+      "citySlug": "shanghai",
+      "cityLabel": "Shanghai",
+      "path": "/data/weather/shanghai.json",
+      "anchorDate": "2026-06-19",
+      "days": 17,
+      "entryHours": [
+        6.0,
+        12.0,
+        18.0,
+        24.0,
+        36.0
+      ],
+      "threshold": 0.5,
+      "eventCount": 17,
+      "bestEntryHour": 36.0,
+      "bestTotalPnl": -0.14500000000000002
+    },
+    {
+      "citySlug": "shenzhen",
+      "cityLabel": "Shenzhen",
+      "path": "/data/weather/shenzhen.json",
+      "anchorDate": "2026-06-19",
+      "days": 17,
+      "entryHours": [
+        6.0,
+        12.0,
+        18.0,
+        24.0,
+        36.0
+      ],
+      "threshold": 0.5,
+      "eventCount": 17,
+      "bestEntryHour": 6.0,
+      "bestTotalPnl": 0.557
+    },
+    {
+      "citySlug": "singapore",
+      "cityLabel": "Singapore",
+      "path": "/data/weather/singapore.json",
+      "anchorDate": "2026-06-19",
+      "days": 17,
+      "entryHours": [
+        6.0,
+        12.0,
+        18.0,
+        24.0,
+        36.0
+      ],
+      "threshold": 0.5,
+      "eventCount": 17,
+      "bestEntryHour": 6.0,
+      "bestTotalPnl": 0.9865
+    },
+    {
+      "citySlug": "taipei",
+      "cityLabel": "Taipei",
+      "path": "/data/weather/taipei.json",
+      "anchorDate": "2026-06-19",
+      "days": 17,
+      "entryHours": [
+        6.0,
+        12.0,
+        18.0,
+        24.0,
+        36.0
+      ],
+      "threshold": 0.5,
+      "eventCount": 17,
+      "bestEntryHour": 6.0,
+      "bestTotalPnl": 0.1825000000000001
+    },
+    {
+      "citySlug": "tokyo",
+      "cityLabel": "Tokyo",
+      "path": "/data/weather/tokyo.json",
+      "anchorDate": "2026-06-19",
+      "days": 17,
+      "entryHours": [
+        6.0,
+        12.0,
+        18.0,
+        24.0,
+        36.0
+      ],
+      "threshold": 0.5,
+      "eventCount": 17,
+      "bestEntryHour": 6.0,
+      "bestTotalPnl": 1.3780000000000001
+    }
+  ]
+}

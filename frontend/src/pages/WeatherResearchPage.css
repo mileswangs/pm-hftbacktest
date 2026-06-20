@@ -83,6 +83,27 @@
   gap: 10px;
 }
 
+.weather-city-board {
+  display: grid;
+  gap: 8px;
+}
+
+.weather-city-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 10px 11px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.weather-city-card.active {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+
 .weather-form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -174,6 +195,52 @@
   gap: 14px;
 }
 
+.weather-research-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 14px;
+}
+
+.weather-note-list {
+  display: grid;
+  gap: 10px;
+}
+
+.weather-note {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--inset);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.weather-capacity-grid,
+.weather-exec-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.weather-capacity-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--inset);
+}
+
+.weather-capacity-item strong {
+  font-size: 16px;
+}
+
+.weather-footnote {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .weather-run-row {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -215,7 +282,10 @@
   }
 
   .weather-hero-metrics,
-  .weather-detail-grid {
+  .weather-detail-grid,
+  .weather-research-grid,
+  .weather-capacity-grid,
+  .weather-exec-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -48,6 +48,34 @@ def _entry_price_from_history(history: list[tuple[int, float]], entry_ts: int) -
     return float(history[idx][1])
 
 
+def _number_or_none(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed != parsed:
+        return None
+    return parsed
+
+
+def _market_stats_payload(market: dict[str, Any]) -> dict[str, float | None]:
+    return {
+        "volume": _number_or_none(market.get("volume")),
+        "volume24hr": _number_or_none(market.get("volume24hr")),
+        "liquidity": _number_or_none(market.get("liquidity")),
+        "spread": _number_or_none(market.get("spread")),
+        "bestBid": _number_or_none(market.get("bestBid")),
+        "bestAsk": _number_or_none(market.get("bestAsk")),
+        "lastTradePrice": _number_or_none(market.get("lastTradePrice")),
+        "rewardsMinSize": _number_or_none(market.get("rewardsMinSize")),
+        "rewardsMaxSpread": _number_or_none(market.get("rewardsMaxSpread")),
+        "orderMinSize": _number_or_none(market.get("orderMinSize")),
+        "orderPriceMinTickSize": _number_or_none(market.get("orderPriceMinTickSize")),
+    }
+
+
 def _output_default_path() -> Path:
     root = Path(__file__).resolve().parents[1]
     return root / "frontend" / "public" / "data" / "chengdu-weather-backtest.json"
@@ -65,11 +93,16 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
-    args = _parse_args()
-    anchor_date = dt.date.fromisoformat(args.anchor_date)
-    entry_hours = _parse_entry_hours(args.entry_hours)
-    threshold = float(args.threshold)
+def build_weather_dataset(
+    *,
+    city_slug: str,
+    city_label: str,
+    anchor_date_iso: str,
+    days: int,
+    entry_hours: list[float],
+    threshold: float,
+) -> dict[str, Any]:
+    anchor_date = dt.date.fromisoformat(anchor_date_iso)
 
     summary_acc: dict[float, dict[str, float]] = defaultdict(
         lambda: {
@@ -85,8 +118,8 @@ def main() -> None:
 
     events_payload: list[dict[str, Any]] = []
 
-    for target_date in daterange(anchor_date, args.days):
-        event_slug = _build_event_slug(args.city_slug, target_date)
+    for target_date in daterange(anchor_date, days):
+        event_slug = _build_event_slug(city_slug, target_date)
         event = fetch_event(event_slug)
         if event is None:
             continue
@@ -108,6 +141,7 @@ def main() -> None:
                     "marketSlug": str(market["slug"]),
                     "yesTokenId": yes_token_id,
                     "isWinner": label == winner_label,
+                    "marketStats": _market_stats_payload(market),
                     "points": [{"t": ts * 1000, "p": price} for ts, price in history],
                 }
             )
@@ -208,12 +242,12 @@ def main() -> None:
         )
 
     best_entry = max(summary_payload, key=lambda item: item["totalPnl"], default=None)
-    payload = {
+    return {
         "generatedAtUtc": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "citySlug": args.city_slug,
-        "cityLabel": args.city_label,
-        "anchorDate": args.anchor_date,
-        "days": args.days,
+        "citySlug": city_slug,
+        "cityLabel": city_label,
+        "anchorDate": anchor_date_iso,
+        "days": days,
         "threshold": threshold,
         "entryHours": entry_hours,
         "bestEntryHour": None if best_entry is None else best_entry["entryHours"],
@@ -221,12 +255,26 @@ def main() -> None:
         "events": events_payload,
     }
 
+
+def main() -> None:
+    args = _parse_args()
+    entry_hours = _parse_entry_hours(args.entry_hours)
+    threshold = float(args.threshold)
+    payload = build_weather_dataset(
+        city_slug=args.city_slug,
+        city_label=args.city_label,
+        anchor_date_iso=args.anchor_date,
+        days=args.days,
+        entry_hours=entry_hours,
+        threshold=threshold,
+    )
+
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
 
     print(f"Wrote {output_path}")
-    for item in summary_payload:
+    for item in payload["summaryByEntryHour"]:
         print(
             f"entry={item['entryHours']:>4g}h traded={item['tradedCount']:>2} "
             f"hit_rate={item['hitRate']:.2%} total_pnl={item['totalPnl']:.4f} "

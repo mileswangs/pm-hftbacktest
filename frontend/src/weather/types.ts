@@ -3,11 +3,26 @@ export interface WeatherPoint {
   p: number;
 }
 
+export interface WeatherMarketStats {
+  volume: number | null;
+  volume24hr: number | null;
+  liquidity: number | null;
+  spread: number | null;
+  bestBid: number | null;
+  bestAsk: number | null;
+  lastTradePrice: number | null;
+  rewardsMinSize: number | null;
+  rewardsMaxSpread: number | null;
+  orderMinSize: number | null;
+  orderPriceMinTickSize: number | null;
+}
+
 export interface WeatherOutcome {
   label: string;
   marketSlug: string;
   yesTokenId: string;
   isWinner: boolean;
+  marketStats: WeatherMarketStats;
   points: WeatherPoint[];
 }
 
@@ -64,4 +79,22 @@ export interface WeatherDataset {
   bestEntryHour: number | null;
   summaryByEntryHour: EntryHourSummary[];
   events: WeatherEvent[];
+}
+
+export interface WeatherLibraryEntry {
+  citySlug: string;
+  cityLabel: string;
+  path: string;
+  anchorDate: string;
+  days: number;
+  entryHours: number[];
+  threshold: number;
+  eventCount: number;
+  bestEntryHour: number | null;
+  bestTotalPnl: number;
+}
+
+export interface WeatherLibraryManifest {
+  generatedAtUtc: string;
+  cities: WeatherLibraryEntry[];
 }
