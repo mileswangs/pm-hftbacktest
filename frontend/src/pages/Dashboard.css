@@ -1,0 +1,50 @@
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 264px 352px minmax(0, 1fr);
+  gap: 18px;
+  width: 100%;
+  max-width: 1540px;
+  margin: 0 auto;
+  padding: 20px 22px 48px;
+  align-items: start;
+}
+
+.col-history {
+  position: sticky;
+  top: 80px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 14px;
+  max-height: calc(100vh - 100px);
+  overflow: hidden;
+}
+
+.col-config {
+  position: sticky;
+  top: 80px;
+}
+
+.col-results {
+  min-width: 0;
+}
+
+@media (max-width: 1120px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  .col-history,
+  .col-config {
+    position: static;
+    max-height: none;
+  }
+}
