@@ -1,0 +1,14 @@
+{
+  "name": "pm-hftbacktest-polymarket-live",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "book": "node ./src/cli.mjs book",
+    "derive-creds": "node ./src/cli.mjs derive-creds",
+    "open-orders": "node ./src/cli.mjs open-orders"
+  },
+  "dependencies": {
+    "@polymarket/clob-client-v2": "^1.0.6",
+    "viem": "^2.53.1"
+  }
+}

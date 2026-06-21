@@ -40,6 +40,7 @@ classifiers = [
 
 [project.optional-dependencies]
 databento = ["databento"]
+polymarket-live = ["polymarket-client>=0.1.0b8"]
 
 [tool.maturin]
 include = [{ path = "rust-toolchain.toml", format = "sdist" }]

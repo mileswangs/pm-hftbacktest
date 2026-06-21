@@ -6,12 +6,15 @@ __pycache__
 venv
 .venv
 .venv_chdb
+node_modules
 docs/_build
 **/Cargo.lock
 **/target
 **/tmp_*
 **/*.so
 .DS_Store
+.env
+.env.*
 
 # Local research data, warehouses, and extracted PMXT slices.
 research/data/
