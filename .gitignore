@@ -4,8 +4,19 @@ build
 *.npz
 __pycache__
 venv
+.venv
+.venv_chdb
 docs/_build
 **/Cargo.lock
 **/target
 **/tmp_*
 **/*.so
+.DS_Store
+
+# Local research data, warehouses, and extracted PMXT slices.
+research/data/
+
+# Common local runtime artifacts.
+*.sqlite3
+*.db
+*.log
