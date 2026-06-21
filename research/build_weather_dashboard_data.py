@@ -22,6 +22,7 @@ from weather_backtest import (
     fetch_yes_price_history,
     select_positions,
 )
+from weather_data_warehouse import build_weather_dataset_from_warehouse, default_db_path
 
 
 DEFAULT_ENTRY_HOURS = [6, 12, 18, 24, 36]
@@ -101,6 +102,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--entry-hours", default="6,12,18,24,36")
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--output", default=str(_output_default_path()))
+    parser.add_argument(
+        "--warehouse-db",
+        default="",
+        help="Optional SQLite warehouse path. If omitted, auto-uses the default warehouse when it exists.",
+    )
     return parser.parse_args()
 
 
@@ -112,7 +118,20 @@ def build_weather_dataset(
     days: int,
     entry_hours: list[float],
     threshold: float,
+    warehouse_db: str | None = None,
 ) -> dict[str, Any]:
+    warehouse_path = Path(warehouse_db) if warehouse_db else default_db_path()
+    if warehouse_path.exists():
+        return build_weather_dataset_from_warehouse(
+            db_path=warehouse_path,
+            city_slug=city_slug,
+            city_label=city_label,
+            anchor_date_iso=anchor_date_iso,
+            days=days,
+            entry_hours=entry_hours,
+            threshold=threshold,
+        )
+
     anchor_date = dt.date.fromisoformat(anchor_date_iso)
 
     summary_acc: dict[float, dict[str, float]] = defaultdict(
@@ -278,6 +297,7 @@ def main() -> None:
         days=args.days,
         entry_hours=entry_hours,
         threshold=threshold,
+        warehouse_db=args.warehouse_db or None,
     )
 
     output_path = Path(args.output)

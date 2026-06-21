@@ -8,6 +8,7 @@ from pathlib import Path
 
 from build_weather_dashboard_data import build_weather_dataset
 from multi_city_weather_scan import DEFAULT_CITIES
+from weather_data_warehouse import default_db_path
 
 
 def _parse_entry_hours(raw: str) -> list[float]:
@@ -43,6 +44,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--cities", default="")
     parser.add_argument("--output-dir", default="")
+    parser.add_argument(
+        "--warehouse-db",
+        default="",
+        help="Optional SQLite warehouse path. If omitted, auto-uses the default warehouse when it exists.",
+    )
     return parser.parse_args()
 
 
@@ -51,6 +57,7 @@ def main() -> None:
     root = Path(__file__).resolve().parents[1]
     output_dir = Path(args.output_dir) if args.output_dir else root / "frontend" / "public" / "data" / "weather"
     output_dir.mkdir(parents=True, exist_ok=True)
+    warehouse_db = args.warehouse_db or (str(default_db_path()) if default_db_path().exists() else None)
 
     entry_hours = _parse_entry_hours(args.entry_hours)
     cities = _parse_cities(args.cities)
@@ -64,6 +71,7 @@ def main() -> None:
             days=args.days,
             entry_hours=entry_hours,
             threshold=float(args.threshold),
+            warehouse_db=warehouse_db,
         )
         output_path = output_dir / f"{city_slug}.json"
         output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))

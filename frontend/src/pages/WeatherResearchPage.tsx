@@ -70,6 +70,30 @@ type ExecutionEventRow = {
   endTimestamp: number;
 };
 
+type NearLockBoardRow = {
+  outcome: WeatherOutcome;
+  labelKey: number | null;
+  entryProb: number | null;
+  staleMinutes: number | null;
+  updates6h: number;
+  spread: number | null;
+  edgeToSettlement: number | null;
+  selected: boolean;
+  isWinner: boolean;
+  verdict: 'trade' | 'watch' | 'avoid';
+  note: string;
+};
+
+type DailyBuyPointRow = {
+  date: string;
+  entryTimeEdt: string;
+  selection: string;
+  probabilityPaid: number;
+  pnl: number;
+  didHit: boolean;
+  winnerLabel: string | null;
+};
+
 function outcomeColor(
   outcome: WeatherOutcome,
   selectedIndex: number,
@@ -148,6 +172,37 @@ function fmtMaybe(value: number | null, digits = 3): string {
   return value.toFixed(digits);
 }
 
+function fmtEdtTimestamp(iso: string): string {
+  const date = new Date(iso);
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  })
+    .format(date)
+    .replace(',', '')
+    .replace(/\//g, '-')
+    .replace(' AM', ' AM EDT')
+    .replace(' PM', ' PM EDT');
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function bucketKey(label: string): number | null {
+  const matches = [...label.matchAll(/-?\d+/g)].map((match) => Number(match[0]));
+  if (matches.length === 0) return null;
+  if (matches.length >= 2) {
+    return (matches[0] + matches[1]) / 2;
+  }
+  return matches[0];
+}
+
 function lastPointAtOrBefore(outcome: WeatherOutcome, ts: number) {
   let answer: { t: number; p: number } | null = null;
   for (const point of outcome.points) {
@@ -187,6 +242,61 @@ function maxAbsMoveAfter(outcome: WeatherOutcome, entryTs: number, horizonMs: nu
     maxMove = Math.max(maxMove, Math.abs(point.p - entryPoint.p));
   }
   return seen ? maxMove : null;
+}
+
+function buildNearLockRows(
+  selectedRun: WeatherRun | null,
+  researchRows: OutcomeResearchRow[],
+  policy: ExecutionPolicy,
+): NearLockBoardRow[] {
+  if (!selectedRun) return [];
+  return researchRows
+    .map((row) => {
+      const entryProb = row.entryProb;
+      const edgeToSettlement = entryProb == null ? null : (row.outcome.isWinner ? 1 : 0) - entryProb;
+      const staleOk = row.staleMinutes != null && row.staleMinutes <= policy.maxStaleMinutes;
+      const updatesOk = row.updates6h >= policy.minUpdates6h;
+      const spreadOk = row.outcome.marketStats.spread == null || row.outcome.marketStats.spread <= 8;
+      const underpriced = entryProb != null && entryProb <= 0.82;
+
+      let verdict: NearLockBoardRow['verdict'] = 'avoid';
+      if (staleOk && updatesOk && spreadOk && underpriced && edgeToSettlement != null && edgeToSettlement >= 0.08) {
+        verdict = 'trade';
+      } else if (staleOk && updatesOk) {
+        verdict = 'watch';
+      }
+
+      const note = !staleOk
+        ? 'feed stale'
+        : !updatesOk
+          ? 'too few prints'
+          : !spreadOk
+            ? 'spread wide'
+            : !underpriced
+              ? 'price already rich'
+              : edgeToSettlement != null && edgeToSettlement >= 0.08
+                ? 'lag still open'
+                : 'thin edge';
+
+      return {
+        outcome: row.outcome,
+        labelKey: bucketKey(row.outcome.label),
+        entryProb,
+        staleMinutes: row.staleMinutes,
+        updates6h: row.updates6h,
+        spread: row.outcome.marketStats.spread,
+        edgeToSettlement,
+        selected: row.selected,
+        isWinner: row.outcome.isWinner,
+        verdict,
+        note,
+      };
+    })
+    .sort((a, b) => {
+      if (a.selected !== b.selected) return a.selected ? -1 : 1;
+      if (a.verdict !== b.verdict) return a.verdict === 'trade' ? -1 : a.verdict === 'watch' ? -1 : 1;
+      return (b.edgeToSettlement ?? -999) - (a.edgeToSettlement ?? -999) || (a.labelKey ?? 0) - (b.labelKey ?? 0);
+    });
 }
 
 function buildAlphaNotes(dataset: WeatherDataset | null): string[] {
@@ -329,6 +439,25 @@ function buildExecutionRows(
     .filter((row): row is ExecutionEventRow => row != null);
 }
 
+function buildDailyBuyPointRows(dataset: WeatherDataset | null, entryHours: number): DailyBuyPointRow[] {
+  if (!dataset) return [];
+  return dataset.events
+    .map((event) => {
+      const run = findRun(event, entryHours);
+      if (!run || run.selectedLabels.length === 0) return null;
+      return {
+        date: event.date,
+        entryTimeEdt: fmtEdtTimestamp(run.entryTimeUtc),
+        selection: run.selectedLabels.join(' + '),
+        probabilityPaid: run.selectedProbabilitySum,
+        pnl: run.pnl,
+        didHit: run.didHit,
+        winnerLabel: event.winnerLabel,
+      };
+    })
+    .filter((row): row is DailyBuyPointRow => row != null);
+}
+
 function computeMaxDrawdown(rows: ExecutionEventRow[], key: 'cumulativeRawPnl' | 'cumulativeConservativePnl'): number {
   let peak = 0;
   let maxDrawdown = 0;
@@ -403,7 +532,7 @@ export function WeatherResearchPage({
     setThresholdInput(String(payload.threshold));
     setSelectedEntryHours(payload.bestEntryHour ?? payload.entryHours[0] ?? null);
     setSelectedEventSlug(payload.events[payload.events.length - 1]?.eventSlug ?? null);
-    setDataSourceLabel(sourceLabel);
+    setDataSourceLabel(payload.dataSource ?? sourceLabel);
     setStatus('ready');
     setProgress(progressMessage);
   }
@@ -553,6 +682,10 @@ export function WeatherResearchPage({
 
   const alphaNotes = useMemo(() => buildAlphaNotes(dataset), [dataset]);
   const eventRows = useMemo(() => buildEventBacktestRows(dataset, selectedEntryHours), [dataset, selectedEntryHours]);
+  const madridDailyBuyRows = useMemo(
+    () => (dataset?.citySlug === 'madrid' ? buildDailyBuyPointRows(dataset, 36) : []),
+    [dataset],
+  );
   const executionPolicy = useMemo<ExecutionPolicy>(
     () => ({
       slippagePerLeg: Number.isFinite(Number(slippageInput)) ? Number(slippageInput) : 0.015,
@@ -623,6 +756,11 @@ export function WeatherResearchPage({
 
   const selectedResearchRows = useMemo(() => researchRows.filter((row) => row.selected), [researchRows]);
 
+  const nearLockRows = useMemo(
+    () => buildNearLockRows(selectedRun, researchRows, executionPolicy),
+    [selectedRun, researchRows, executionPolicy],
+  );
+
   const capacitySummary = useMemo(() => {
     const basis = selectedResearchRows.length > 0 ? selectedResearchRows : researchRows.slice(0, 2);
     return {
@@ -643,6 +781,82 @@ export function WeatherResearchPage({
       ),
     };
   }, [researchRows, selectedResearchRows, selectedRun]);
+
+  const nearLockSummary = useMemo(() => {
+    const selectedRows = nearLockRows.filter((row) => row.selected);
+    const baseRows = selectedRows.length > 0 ? selectedRows : nearLockRows.slice(0, 2);
+    const avgStale =
+      average(baseRows.map((row) => row.staleMinutes)) ?? average(nearLockRows.map((row) => row.staleMinutes)) ?? executionPolicy.maxStaleMinutes;
+    const avgUpdates =
+      average(baseRows.map((row) => row.updates6h)) ?? average(nearLockRows.map((row) => row.updates6h)) ?? executionPolicy.minUpdates6h;
+    const avgSpread =
+      average(baseRows.map((row) => row.spread)) ?? average(nearLockRows.map((row) => row.spread)) ?? 8;
+    const realizedEdge = selectedRun ? (selectedRun.didHit ? 1 : 0) - selectedRun.selectedProbabilitySum : 0;
+    const marketLag = clamp01(selectedRun?.didHit ? 1 - selectedRun.selectedProbabilitySum : 0);
+    const freshnessScore = clamp01(1 - avgStale / Math.max(executionPolicy.maxStaleMinutes, 1));
+    const cadenceScore = clamp01(avgUpdates / Math.max(executionPolicy.minUpdates6h, 1));
+    const spreadScore = clamp01(1 - avgSpread / 12);
+    const lockScore = Math.round((marketLag * 0.42 + freshnessScore * 0.24 + cadenceScore * 0.2 + spreadScore * 0.14) * 100);
+    const triggerCount = [
+      selectedRun != null && selectedRun.entryHours >= 6 && selectedRun.entryHours <= 18,
+      selectedRun != null && selectedRun.selectedProbabilitySum <= 0.82,
+      avgStale <= executionPolicy.maxStaleMinutes,
+      avgUpdates >= executionPolicy.minUpdates6h,
+      avgSpread <= 8,
+    ].filter(Boolean).length;
+
+    return {
+      lockScore,
+      realizedEdge,
+      avgStale,
+      avgUpdates,
+      avgSpread,
+      triggerCount,
+      windowLabel:
+        selectedRun == null
+          ? '-'
+          : selectedRun.entryHours < 6
+            ? 'sub-6h chase'
+            : selectedRun.entryHours <= 18
+              ? 'core 6-18h'
+              : 'pre-close early',
+      headline:
+        selectedRun == null
+          ? 'No active setup'
+          : realizedEdge >= 0.12
+            ? 'Captured a genuine late-day lag'
+            : realizedEdge >= 0
+              ? 'Edge existed, but it was already tighter'
+              : 'Looked tradable, but did not lock cleanly',
+      checklist: [
+        {
+          label: 'Settlement window',
+          value: selectedRun == null ? '-' : `${selectedRun.entryHours}h to close`,
+          pass: selectedRun != null && selectedRun.entryHours >= 6 && selectedRun.entryHours <= 18,
+        },
+        {
+          label: 'Market price paid',
+          value: selectedRun == null ? '-' : fmtPct(selectedRun.selectedProbabilitySum, 1),
+          pass: selectedRun != null && selectedRun.selectedProbabilitySum <= 0.82,
+        },
+        {
+          label: 'Feed freshness',
+          value: `${fmtMaybe(avgStale, 1)}m`,
+          pass: avgStale <= executionPolicy.maxStaleMinutes,
+        },
+        {
+          label: 'Print cadence',
+          value: `${fmtMaybe(avgUpdates, 1)} / 6h`,
+          pass: avgUpdates >= executionPolicy.minUpdates6h,
+        },
+        {
+          label: 'Spread regime',
+          value: avgSpread == null ? '-' : `${avgSpread.toFixed(1)}c`,
+          pass: avgSpread <= 8,
+        },
+      ],
+    };
+  }, [nearLockRows, selectedRun, executionPolicy]);
 
   const isCustomCity = cityPresetValue === CUSTOM_CITY_VALUE;
   const selectedPresetHasArchive = useMemo(
@@ -752,6 +966,11 @@ export function WeatherResearchPage({
                     <strong className={totals.totalPnl >= 0 ? 'pos' : 'neg'}>{totals.totalPnl.toFixed(3)}</strong>
                   </div>
                 </div>
+                {dataset.dataSourceDetail ? (
+                  <p className="muted" style={{ margin: '8px 0 0', fontSize: 12.5 }}>
+                    {dataset.dataSourceDetail}
+                  </p>
+                ) : null}
               </div>
 
               <ul className="weather-event-list">
@@ -1046,6 +1265,97 @@ export function WeatherResearchPage({
                 </div>
               </div>
 
+              <section className="weather-nearlock card rise">
+                <div className="weather-nearlock-header">
+                  <div>
+                    <div className="weather-nearlock-kicker">Near-Lock Console</div>
+                    <h3>Late-settlement readout for the selected day</h3>
+                    <p>
+                      Modeled after Parity-style market boards, but focused on the last 6-18 hours: settlement-station freshness, price lag, and
+                      whether the book still looked underpriced versus the final outcome.
+                    </p>
+                  </div>
+                  <div className="weather-nearlock-badge">
+                    <span className="eyebrow">Window</span>
+                    <strong>{nearLockSummary.windowLabel}</strong>
+                    <span>{nearLockSummary.triggerCount}/5 tweet checks passed</span>
+                  </div>
+                </div>
+
+                <div className="weather-nearlock-scoreboard">
+                  <div className="weather-nearlock-metric">
+                    <span className="eyebrow">Lock Score</span>
+                    <strong>{nearLockSummary.lockScore}</strong>
+                    <span>{nearLockSummary.headline}</span>
+                  </div>
+                  <div className="weather-nearlock-metric">
+                    <span className="eyebrow">Realized Edge</span>
+                    <strong className={nearLockSummary.realizedEdge >= 0 ? 'pos' : 'neg'}>{fmtPct(nearLockSummary.realizedEdge, 1)}</strong>
+                    <span>settlement payout minus price paid</span>
+                  </div>
+                  <div className="weather-nearlock-metric">
+                    <span className="eyebrow">Feed Freshness</span>
+                    <strong>{fmtMaybe(nearLockSummary.avgStale, 1)}m</strong>
+                    <span>selected bucket average stale time</span>
+                  </div>
+                  <div className="weather-nearlock-metric">
+                    <span className="eyebrow">Print Cadence</span>
+                    <strong>{fmtMaybe(nearLockSummary.avgUpdates, 1)}</strong>
+                    <span>updates captured in the last 6h</span>
+                  </div>
+                </div>
+
+                <div className="weather-nearlock-grid">
+                  <section className="weather-nearlock-panel">
+                    <div className="eyebrow" style={{ marginBottom: 8 }}>
+                      Trigger Checklist
+                    </div>
+                    <div className="weather-nearlock-checks">
+                      {nearLockSummary.checklist.map((item) => (
+                        <div key={item.label} className={`weather-nearlock-check ${item.pass ? 'pass' : 'fail'}`}>
+                          <span>{item.label}</span>
+                          <strong>{item.value}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="weather-nearlock-panel">
+                    <div className="eyebrow" style={{ marginBottom: 8 }}>
+                      Bucket Ladder
+                    </div>
+                    <div className="weather-nearlock-table">
+                      <div className="weather-nearlock-row weather-nearlock-row-head">
+                        <span>Bucket</span>
+                        <span>Px</span>
+                        <span>Edge</span>
+                        <span>Feed</span>
+                        <span>Call</span>
+                      </div>
+                      {nearLockRows.slice(0, 6).map((row) => (
+                        <div key={row.outcome.label} className={`weather-nearlock-row ${row.verdict}`}>
+                          <span>
+                            {row.outcome.label}
+                            <div className="weather-chip-row" style={{ marginTop: 4 }}>
+                              {row.selected ? <span className="weather-chip strong">bought</span> : null}
+                              {row.isWinner ? <span className="weather-chip">winner</span> : null}
+                            </div>
+                          </span>
+                          <span className="mono">{row.entryProb == null ? '-' : fmtPct(row.entryProb, 1)}</span>
+                          <span className={`mono ${row.edgeToSettlement != null && row.edgeToSettlement >= 0 ? 'pos' : 'neg'}`}>
+                            {row.edgeToSettlement == null ? '-' : fmtPct(row.edgeToSettlement, 1)}
+                          </span>
+                          <span className="mono">
+                            {fmtMaybe(row.staleMinutes, 1)}m / {row.updates6h}
+                          </span>
+                          <span className={`weather-nearlock-tag ${row.verdict}`}>{row.note}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                </div>
+              </section>
+
               <section className="card" style={{ padding: 16 }}>
                 <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>
                   <div>
@@ -1269,6 +1579,51 @@ export function WeatherResearchPage({
                   </p>
                 </section>
               </div>
+
+              {dataset.citySlug === 'madrid' && madridDailyBuyRows.length > 0 ? (
+                <section className="card" style={{ padding: 16 }}>
+                  <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>
+                    <div>
+                      <div className="eyebrow">36h Daily Buy Points</div>
+                      <h3 style={{ fontSize: 16 }}>EDT verification sheet for the PMXT Madrid replay</h3>
+                    </div>
+                    <div className="muted" style={{ fontSize: 12, maxWidth: 440, textAlign: 'right' }}>
+                      These rows are the exact daily buy calls for the 36h Madrid strategy, converted to New York time so you can verify them directly in the market UI.
+                    </div>
+                  </header>
+                  <div className="weather-event-table-wrap">
+                    <table className="weather-event-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>EDT Buy Time</th>
+                          <th>Buy</th>
+                          <th>Paid</th>
+                          <th>PnL</th>
+                          <th>Hit</th>
+                          <th>Winner</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...madridDailyBuyRows].reverse().map((row) => (
+                          <tr key={`${row.date}-${row.entryTimeEdt}`}>
+                            <td className="mono">{fmtDateShort(row.date)}</td>
+                            <td className="mono">{row.entryTimeEdt}</td>
+                            <td>{row.selection}</td>
+                            <td className="mono">{fmtPct(row.probabilityPaid, 1)}</td>
+                            <td className={`mono ${row.pnl >= 0 ? 'pos' : 'neg'}`}>{row.pnl.toFixed(3)}</td>
+                            <td>{row.didHit ? 'Yes' : 'No'}</td>
+                            <td>{row.winnerLabel ?? '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {dataset.timezoneNote ? (
+                    <p className="muted weather-footnote">{dataset.timezoneNote}</p>
+                  ) : null}
+                </section>
+              ) : null}
 
               <section className="card" style={{ padding: 16 }}>
                 <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>

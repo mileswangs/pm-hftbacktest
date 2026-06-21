@@ -79,6 +79,9 @@ export interface WeatherDataset {
   bestEntryHour: number | null;
   summaryByEntryHour: EntryHourSummary[];
   events: WeatherEvent[];
+  dataSource?: string;
+  dataSourceDetail?: string;
+  timezoneNote?: string;
 }
 
 export interface WeatherLibraryEntry {
