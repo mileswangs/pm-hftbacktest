@@ -1,0 +1,659 @@
+{
+  "generatedAtUtc": "2026-06-21T20:50:31Z",
+  "traders": [
+    {
+      "wallet": "0xb40e89677d59665d5188541ad860450a6e2a7cc9",
+      "alias": "Poligarch",
+      "asOf": "2026-06-21",
+      "lifetimePnl": 165377.63,
+      "lifetimeVolume": 21755274.14,
+      "currentValue": 96703.65,
+      "weatherPct": 93.7,
+      "avgTradeUsd": 5.89,
+      "sellRatio": 0.0,
+      "redeems": 104,
+      "nCities": 48,
+      "direction": {
+        "yes": 1598,
+        "no": 1572
+      },
+      "priceRegime": {
+        "60-90c": 958,
+        "10-40c": 1044,
+        ">90c (near-certain)": 297,
+        "<10c (tail)": 348,
+        "40-60c (mid)": 523
+      },
+      "entryHours": {
+        "p10": 5.0,
+        "median": 11.2,
+        "p90": 33.0
+      },
+      "topCities": [
+        [
+          "London",
+          335
+        ],
+        [
+          "Paris",
+          260
+        ],
+        [
+          "Los Angeles",
+          164
+        ],
+        [
+          "Nyc",
+          162
+        ],
+        [
+          "Madrid",
+          148
+        ],
+        [
+          "Miami",
+          127
+        ],
+        [
+          "Toronto",
+          118
+        ],
+        [
+          "Ankara",
+          111
+        ]
+      ],
+      "style": "generalist",
+      "nFills": 3170,
+      "pnlSeriesLast": 165251.2
+    },
+    {
+      "wallet": "0xfbd8c9c22ca76b3662d0e53a4f79719fdc684027",
+      "alias": "0xfBd8C9C22",
+      "asOf": "2026-06-21",
+      "lifetimePnl": 135975.2,
+      "lifetimeVolume": 9832686.16,
+      "currentValue": 1096.47,
+      "weatherPct": 53.6,
+      "avgTradeUsd": 9.6,
+      "sellRatio": 0.024,
+      "redeems": 111,
+      "nCities": 46,
+      "direction": {
+        "yes": 41,
+        "no": 1518
+      },
+      "priceRegime": {
+        ">90c (near-certain)": 900,
+        "10-40c": 63,
+        "60-90c": 420,
+        "40-60c (mid)": 134,
+        "<10c (tail)": 4
+      },
+      "entryHours": {
+        "p10": 7.1,
+        "median": 11.8,
+        "p90": 58.2
+      },
+      "topCities": [
+        [
+          "Paris",
+          124
+        ],
+        [
+          "Toronto",
+          114
+        ],
+        [
+          "Mexico City",
+          81
+        ],
+        [
+          "London",
+          81
+        ],
+        [
+          "Shanghai",
+          76
+        ],
+        [
+          "Atlanta",
+          69
+        ],
+        [
+          "Chongqing",
+          64
+        ],
+        [
+          "Singapore",
+          60
+        ]
+      ],
+      "style": "no-convergence",
+      "nFills": 1585,
+      "pnlSeriesLast": 135892.05
+    },
+    {
+      "wallet": "0x74957ea27ac4fbdee46d861fdae357859ff67fcf",
+      "alias": "ultralisk",
+      "asOf": "2026-06-21",
+      "lifetimePnl": 85102.09,
+      "lifetimeVolume": 13510236.38,
+      "currentValue": 89409.58,
+      "weatherPct": 31.0,
+      "avgTradeUsd": 2.79,
+      "sellRatio": 0.0,
+      "redeems": 614,
+      "nCities": 46,
+      "direction": {
+        "yes": 511,
+        "no": 154
+      },
+      "priceRegime": {
+        "<10c (tail)": 397,
+        "10-40c": 114,
+        ">90c (near-certain)": 52,
+        "60-90c": 102
+      },
+      "entryHours": {
+        "p10": 30.6,
+        "median": 38.9,
+        "p90": 62.1
+      },
+      "topCities": [
+        [
+          "Karachi",
+          59
+        ],
+        [
+          "Shanghai",
+          37
+        ],
+        [
+          "Hong Kong",
+          37
+        ],
+        [
+          "Beijing",
+          32
+        ],
+        [
+          "London",
+          29
+        ],
+        [
+          "Nyc",
+          27
+        ],
+        [
+          "Cape Town",
+          23
+        ],
+        [
+          "Seoul",
+          21
+        ]
+      ],
+      "style": "long-tail",
+      "nFills": 612,
+      "pnlSeriesLast": 85123.79
+    },
+    {
+      "wallet": "0x1cdd071bb612de6d66d0c882b676c663697de595",
+      "alias": "Lavincey",
+      "asOf": "2026-06-21",
+      "lifetimePnl": 72556.9,
+      "lifetimeVolume": 30510966.57,
+      "currentValue": 44667.32,
+      "weatherPct": 31.7,
+      "avgTradeUsd": 5.54,
+      "sellRatio": 0.0,
+      "redeems": 1,
+      "nCities": 49,
+      "direction": {
+        "yes": 509,
+        "no": 366
+      },
+      "priceRegime": {
+        "10-40c": 328,
+        "<10c (tail)": 193,
+        "60-90c": 203,
+        "40-60c (mid)": 95,
+        ">90c (near-certain)": 56
+      },
+      "entryHours": {
+        "p10": 3.6,
+        "median": 27.8,
+        "p90": 51.6
+      },
+      "topCities": [
+        [
+          "London",
+          48
+        ],
+        [
+          "Paris",
+          45
+        ],
+        [
+          "Shanghai",
+          44
+        ],
+        [
+          "Toronto",
+          43
+        ],
+        [
+          "Houston",
+          38
+        ],
+        [
+          "Nyc",
+          32
+        ],
+        [
+          "San Francisco",
+          31
+        ],
+        [
+          "Los Angeles",
+          31
+        ]
+      ],
+      "style": "farmer",
+      "nFills": 801,
+      "pnlSeriesLast": 70664.25
+    },
+    {
+      "wallet": "0xd23f8c8aab13cfb2a35da40b67f8471faf9894a1",
+      "alias": "Corlys",
+      "asOf": "2026-06-21",
+      "lifetimePnl": 62663.17,
+      "lifetimeVolume": 4867573.68,
+      "currentValue": 2126.82,
+      "weatherPct": 32.8,
+      "avgTradeUsd": 8.86,
+      "sellRatio": 0.003,
+      "redeems": 5,
+      "nCities": 34,
+      "direction": {
+        "yes": 2,
+        "no": 663
+      },
+      "priceRegime": {
+        ">90c (near-certain)": 372,
+        "60-90c": 221,
+        "10-40c": 17,
+        "40-60c (mid)": 50,
+        "<10c (tail)": 3
+      },
+      "entryHours": {
+        "p10": 7.3,
+        "median": 29.7,
+        "p90": 54.6
+      },
+      "topCities": [
+        [
+          "Hong Kong",
+          84
+        ],
+        [
+          "Shanghai",
+          83
+        ],
+        [
+          "Toronto",
+          40
+        ],
+        [
+          "Chengdu",
+          36
+        ],
+        [
+          "London",
+          35
+        ],
+        [
+          "Paris",
+          30
+        ],
+        [
+          "Denver",
+          28
+        ],
+        [
+          "Atlanta",
+          26
+        ]
+      ],
+      "style": "no-convergence",
+      "nFills": 686,
+      "pnlSeriesLast": 61835.07
+    },
+    {
+      "wallet": "0x6a8d1709bfb718d8555d315a983c4816278350f9",
+      "alias": "OnlyLuckNoBrain",
+      "asOf": "2026-06-21",
+      "lifetimePnl": 27617.08,
+      "lifetimeVolume": 1950681.22,
+      "currentValue": 8852.48,
+      "weatherPct": 100.0,
+      "avgTradeUsd": 6.38,
+      "sellRatio": 0.073,
+      "redeems": 238,
+      "nCities": 47,
+      "direction": {
+        "yes": 2366,
+        "no": 882
+      },
+      "priceRegime": {
+        "60-90c": 760,
+        "10-40c": 1585,
+        "<10c (tail)": 638,
+        "40-60c (mid)": 27
+      },
+      "entryHours": {
+        "p10": 30.2,
+        "median": 44.3,
+        "p90": 61.7
+      },
+      "topCities": [
+        [
+          "Amsterdam",
+          193
+        ],
+        [
+          "Hong Kong",
+          162
+        ],
+        [
+          "Madrid",
+          159
+        ],
+        [
+          "Seoul",
+          151
+        ],
+        [
+          "Ankara",
+          128
+        ],
+        [
+          "Kuala Lumpur",
+          127
+        ],
+        [
+          "Chongqing",
+          114
+        ],
+        [
+          "Taipei",
+          99
+        ]
+      ],
+      "style": "yes-forecast",
+      "nFills": 3248,
+      "pnlSeriesLast": 27092.5
+    },
+    {
+      "wallet": "0x8fbd7cf5f806f563080864694415829f7229a959",
+      "alias": "badatmath.",
+      "asOf": "2026-06-21",
+      "lifetimePnl": 25406.61,
+      "lifetimeVolume": 1539974.56,
+      "currentValue": 16003.59,
+      "weatherPct": 100.0,
+      "avgTradeUsd": 3.75,
+      "sellRatio": 0.0,
+      "redeems": 27,
+      "nCities": 45,
+      "direction": {
+        "yes": 1902,
+        "no": 1378
+      },
+      "priceRegime": {
+        "60-90c": 682,
+        "40-60c (mid)": 660,
+        "10-40c": 1314,
+        "<10c (tail)": 619,
+        ">90c (near-certain)": 5
+      },
+      "entryHours": {
+        "p10": 5.0,
+        "median": 15.5,
+        "p90": 55.5
+      },
+      "topCities": [
+        [
+          "Houston",
+          180
+        ],
+        [
+          "Toronto",
+          141
+        ],
+        [
+          "Chicago",
+          133
+        ],
+        [
+          "Dallas",
+          126
+        ],
+        [
+          "Paris",
+          119
+        ],
+        [
+          "Tokyo",
+          119
+        ],
+        [
+          "Atlanta",
+          106
+        ],
+        [
+          "London",
+          103
+        ]
+      ],
+      "style": "generalist",
+      "nFills": 3280,
+      "pnlSeriesLast": 24978.723
+    },
+    {
+      "wallet": "0x6011655c4afb76f36dd1b08a137a1ba73466b31e",
+      "alias": "HighTempTation",
+      "asOf": "2026-06-21",
+      "lifetimePnl": 18670.92,
+      "lifetimeVolume": 473258.24,
+      "currentValue": 0,
+      "weatherPct": 99.6,
+      "avgTradeUsd": 176.87,
+      "sellRatio": 0.667,
+      "redeems": 7,
+      "nCities": 43,
+      "direction": {
+        "yes": 110,
+        "no": 2388
+      },
+      "priceRegime": {
+        ">90c (near-certain)": 631,
+        "40-60c (mid)": 11,
+        "60-90c": 176,
+        "<10c (tail)": 5,
+        "10-40c": 8
+      },
+      "entryHours": {
+        "p10": 2.9,
+        "median": 13.1,
+        "p90": 21.0
+      },
+      "topCities": [
+        [
+          "Taipei",
+          427
+        ],
+        [
+          "Paris",
+          168
+        ],
+        [
+          "Cape Town",
+          167
+        ],
+        [
+          "Sao Paulo",
+          116
+        ],
+        [
+          "Panama City",
+          113
+        ],
+        [
+          "Mexico City",
+          107
+        ],
+        [
+          "Warsaw",
+          96
+        ],
+        [
+          "Karachi",
+          93
+        ]
+      ],
+      "style": "no-convergence",
+      "nFills": 2501,
+      "pnlSeriesLast": 18539.895
+    },
+    {
+      "wallet": "0x3329cfc2b8d8ceb8d198f081bdf4262f421f43a6",
+      "alias": "TENETENET",
+      "asOf": "2026-06-21",
+      "lifetimePnl": 6442.66,
+      "lifetimeVolume": 40873017.26,
+      "currentValue": 3932.94,
+      "weatherPct": 45.1,
+      "avgTradeUsd": 0.03,
+      "sellRatio": 0.006,
+      "redeems": 3,
+      "nCities": 49,
+      "direction": {
+        "yes": 1530,
+        "no": 48
+      },
+      "priceRegime": {
+        "<10c (tail)": 1568
+      },
+      "entryHours": {
+        "p10": 7.0,
+        "median": 16.8,
+        "p90": 62.5
+      },
+      "topCities": [
+        [
+          "Hong Kong",
+          68
+        ],
+        [
+          "Seoul",
+          66
+        ],
+        [
+          "Karachi",
+          66
+        ],
+        [
+          "Shenzhen",
+          51
+        ],
+        [
+          "Singapore",
+          50
+        ],
+        [
+          "Moscow",
+          49
+        ],
+        [
+          "Nyc",
+          49
+        ],
+        [
+          "Ankara",
+          49
+        ]
+      ],
+      "style": "farmer",
+      "nFills": 1578,
+      "pnlSeriesLast": 5996.3022
+    },
+    {
+      "wallet": "0xa3e22cd32aa9238ef7dbcfb4761e33b9eaa1fdf8",
+      "alias": "pootytherewardfarmer",
+      "asOf": "2026-06-21",
+      "lifetimePnl": -179819.36,
+      "lifetimeVolume": 19414312.07,
+      "currentValue": 78202.47,
+      "weatherPct": 83.8,
+      "avgTradeUsd": 8.1,
+      "sellRatio": 0.255,
+      "redeems": 249,
+      "nCities": 49,
+      "direction": {
+        "yes": 1405,
+        "no": 1271
+      },
+      "priceRegime": {
+        "60-90c": 689,
+        ">90c (near-certain)": 23,
+        "<10c (tail)": 115,
+        "10-40c": 897,
+        "40-60c (mid)": 270
+      },
+      "entryHours": {
+        "p10": 9.3,
+        "median": 24.5,
+        "p90": 46.4
+      },
+      "topCities": [
+        [
+          "Shanghai",
+          97
+        ],
+        [
+          "Nyc",
+          94
+        ],
+        [
+          "Miami",
+          92
+        ],
+        [
+          "Tokyo",
+          89
+        ],
+        [
+          "Cape Town",
+          84
+        ],
+        [
+          "Atlanta",
+          81
+        ],
+        [
+          "Kuala Lumpur",
+          78
+        ],
+        [
+          "Hong Kong",
+          77
+        ]
+      ],
+      "style": "farmer",
+      "nFills": 2676,
+      "pnlSeriesLast": -180372.52
+    }
+  ]
+}
