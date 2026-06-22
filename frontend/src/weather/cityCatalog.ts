@@ -1,4 +1,10 @@
-export const CITY_PRESETS = [
+export interface CityPreset {
+  slug: string;
+  label: string;
+  sourceSlug?: string;
+}
+
+export const CITY_PRESETS: readonly CityPreset[] = [
   { slug: 'chengdu', label: 'Chengdu' },
   { slug: 'beijing', label: 'Beijing' },
   { slug: 'shanghai', label: 'Shanghai' },
@@ -12,8 +18,9 @@ export const CITY_PRESETS = [
   { slug: 'london', label: 'London' },
   { slug: 'paris', label: 'Paris' },
   { slug: 'madrid', label: 'Madrid' },
+  { slug: 'madrid-latest-proxy', label: 'Madrid Latest · price proxy', sourceSlug: 'madrid' },
   { slug: 'taipei', label: 'Taipei' },
-] as const;
+];
 
 export const CUSTOM_CITY_VALUE = '__custom__';
 

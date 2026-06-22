@@ -101,3 +101,32 @@ export interface WeatherLibraryManifest {
   generatedAtUtc: string;
   cities: WeatherLibraryEntry[];
 }
+
+export interface WeatherOrderbookCapacityRow {
+  citySlug: string;
+  targetDate: string;
+  eventSlug: string;
+  bucketLabel: string;
+  entryHours: number;
+  entryTimeUtc: string;
+  selectedProbability: number;
+  snapshotBestAsk: number | null;
+  snapshotBestBid: number | null;
+  snapshotSide: string | null;
+  snapshotSize: number | null;
+  snapshotTimestampReceived: string | null;
+  topAskPrice: number | null;
+  topAskSize: number | null;
+  cumSizePlus1c: number | null;
+  cumSizePlus2c: number | null;
+  cumSizePlus5c: number | null;
+  bookTimestampReceived: string | null;
+  bookAgeMinutes: number | null;
+}
+
+export interface WeatherOrderbookCapacityDataset {
+  generatedAtUtc: string;
+  citySlug: string;
+  entryHours: number;
+  rows: WeatherOrderbookCapacityRow[];
+}

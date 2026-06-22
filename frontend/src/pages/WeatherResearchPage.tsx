@@ -3,17 +3,17 @@ import { LineChart } from '../charts/LineChart';
 import type { ChartMarker, ChartRule, ChartSeries } from '../charts/LineChart';
 import { TopBar } from '../components/TopBar';
 import type { AppMode } from '../components/TopBar';
+import { TabBar } from '../components/TabBar';
+import type { TabItem } from '../components/TabBar';
 import { fmtDateShort, fmtDateTime, fmtPct } from '../lib/format';
 import { CHART, COMPARE_COLORS } from '../theme/colors';
 import { buildWeatherDataset, inferCityLabel, parseEntryHours } from '../weather/buildDataset';
 import { CITY_PRESETS, CUSTOM_CITY_VALUE, findPresetCity } from '../weather/cityCatalog';
 import type {
-  EntryHourSummary,
   WeatherDataset,
-  WeatherEvent,
   WeatherLibraryManifest,
-  WeatherOutcome,
-  WeatherRun,
+  WeatherOrderbookCapacityDataset,
+  WeatherOrderbookCapacityRow,
 } from '../weather/types';
 import './Dashboard.css';
 import './WeatherResearchPage.css';
@@ -22,469 +22,53 @@ const LEGACY_DATA_URL = '/data/chengdu-weather-backtest.json';
 const LIBRARY_MANIFEST_URL = '/data/weather/manifest.json';
 
 type LoadState = 'loading' | 'ready' | 'error';
+type WorkspaceTab = 'overview' | 'signal' | 'liquidity' | 'risk' | 'audit';
+type SidebarTab = 'setup' | 'explore';
 
-type OutcomeResearchRow = {
-  outcome: WeatherOutcome;
-  entryProb: number | null;
-  selected: boolean;
-  staleMinutes: number | null;
-  updates6h: number;
-  move1hAfterEntry: number | null;
-};
+const WORKSPACE_TABS = [
+  { id: 'overview', label: 'Overview', description: 'Decision and headline PnL' },
+  { id: 'signal', label: 'Signal Lab', description: 'Timing and market behavior' },
+  { id: 'liquidity', label: 'Liquidity', description: 'Depth, size, and friction' },
+  { id: 'risk', label: 'Risk', description: 'Guardrails and drawdown' },
+  { id: 'audit', label: 'Event Audit', description: 'Every historical decision' },
+] as const satisfies readonly TabItem<WorkspaceTab>[];
 
-type EventBacktestRow = {
-  eventSlug: string;
-  date: string;
-  winnerLabel: string | null;
-  entryHours: number;
-  pnl: number;
-  cumulativePnl: number;
-  didHit: boolean;
-  selectedLabels: string[];
-  selectedProbabilitySum: number;
-  selectionMode: string;
-  reason: string;
-};
+const SIDEBAR_TABS = [
+  { id: 'setup', label: 'Setup' },
+  { id: 'explore', label: 'Explore' },
+] as const satisfies readonly TabItem<SidebarTab>[];
 
-type ExecutionPolicy = {
-  slippagePerLeg: number;
-  feePerLeg: number;
-  maxStaleMinutes: number;
-  minUpdates6h: number;
-};
-
-type ExecutionEventRow = {
-  eventSlug: string;
-  date: string;
-  rawPnl: number;
-  conservativePnl: number;
-  cumulativeRawPnl: number;
-  cumulativeConservativePnl: number;
-  selectedProbabilitySum: number;
-  conservativeCost: number;
-  didHit: boolean;
-  selectedLabels: string[];
-  blockedByPolicy: boolean;
-  blockReasons: string[];
-  entryTimestamp: number;
-  endTimestamp: number;
-};
-
-type NearLockBoardRow = {
-  outcome: WeatherOutcome;
-  labelKey: number | null;
-  entryProb: number | null;
-  staleMinutes: number | null;
-  updates6h: number;
-  spread: number | null;
-  edgeToSettlement: number | null;
-  selected: boolean;
-  isWinner: boolean;
-  verdict: 'trade' | 'watch' | 'avoid';
-  note: string;
-};
-
-type DailyBuyPointRow = {
-  date: string;
-  entryTimeEdt: string;
-  selection: string;
-  probabilityPaid: number;
-  pnl: number;
-  didHit: boolean;
-  winnerLabel: string | null;
-};
-
-function outcomeColor(
-  outcome: WeatherOutcome,
-  selectedIndex: number,
-  topCandidateLabels: Set<string>,
-): { color: string; opacity?: number; dashed?: boolean } {
-  if (selectedIndex >= 0) {
-    return { color: COMPARE_COLORS[selectedIndex % COMPARE_COLORS.length] };
-  }
-  if (outcome.isWinner) {
-    return { color: CHART.position };
-  }
-  if (topCandidateLabels.has(outcome.label)) {
-    return { color: '#9a6b1f', opacity: 0.78 };
-  }
-  return { color: CHART.price, opacity: 0.28, dashed: true };
-}
-
-function toneForPnl(value: number): string {
-  if (value > 0) {
-    return `rgba(79, 122, 46, ${Math.min(0.65, 0.18 + Math.abs(value) * 0.5)})`;
-  }
-  if (value < 0) {
-    return `rgba(178, 58, 46, ${Math.min(0.65, 0.18 + Math.abs(value) * 0.5)})`;
-  }
-  return 'rgba(122, 105, 81, 0.12)';
-}
-
-function sumSummary(summary: EntryHourSummary[]) {
-  const totalTrades = summary.reduce((acc, item) => acc + item.tradedCount, 0);
-  const totalPnl = summary.reduce((acc, item) => acc + item.totalPnl, 0);
-  return { totalTrades, totalPnl };
-}
-
-function findRun(event: WeatherEvent | null, entryHours: number | null): WeatherRun | null {
-  if (!event || entryHours == null) return null;
-  return event.runs.find((run) => run.entryHours === entryHours) ?? null;
-}
-
-function average(values: Array<number | null | undefined>): number | null {
-  const usable = values.filter((value): value is number => value != null && Number.isFinite(value));
-  if (usable.length === 0) return null;
-  return usable.reduce((acc, value) => acc + value, 0) / usable.length;
-}
-
-function sumNullable(values: Array<number | null | undefined>): number | null {
-  const usable = values.filter((value): value is number => value != null && Number.isFinite(value));
-  if (usable.length === 0) return null;
-  return usable.reduce((acc, value) => acc + value, 0);
-}
-
-function minNullable(values: Array<number | null | undefined>): number | null {
-  const usable = values.filter((value): value is number => value != null && Number.isFinite(value));
-  if (usable.length === 0) return null;
-  return Math.min(...usable);
-}
-
-function medianNullable(values: Array<number | null | undefined>): number | null {
-  const usable = values
-    .filter((value): value is number => value != null && Number.isFinite(value))
-    .sort((a, b) => a - b);
-  if (usable.length === 0) return null;
-  const mid = Math.floor(usable.length / 2);
-  return usable.length % 2 === 0 ? (usable[mid - 1] + usable[mid]) / 2 : usable[mid];
-}
-
-function fmtCompact(value: number | null, digits = 2): string {
-  if (value == null) return '-';
-  return value.toLocaleString('en-US', {
-    notation: Math.abs(value) >= 1000 ? 'compact' : 'standard',
-    maximumFractionDigits: digits,
-  });
-}
-
-function fmtMaybe(value: number | null, digits = 3): string {
-  if (value == null) return '-';
-  return value.toFixed(digits);
-}
-
-function fmtEdtTimestamp(iso: string): string {
-  const date = new Date(iso);
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-  })
-    .format(date)
-    .replace(',', '')
-    .replace(/\//g, '-')
-    .replace(' AM', ' AM EDT')
-    .replace(' PM', ' PM EDT');
-}
-
-function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, value));
-}
-
-function bucketKey(label: string): number | null {
-  const matches = [...label.matchAll(/-?\d+/g)].map((match) => Number(match[0]));
-  if (matches.length === 0) return null;
-  if (matches.length >= 2) {
-    return (matches[0] + matches[1]) / 2;
-  }
-  return matches[0];
-}
-
-function lastPointAtOrBefore(outcome: WeatherOutcome, ts: number) {
-  let answer: { t: number; p: number } | null = null;
-  for (const point of outcome.points) {
-    if (point.t > ts) break;
-    answer = point;
-  }
-  return answer;
-}
-
-function firstPointAfter(outcome: WeatherOutcome, ts: number) {
-  for (const point of outcome.points) {
-    if (point.t > ts) return point;
-  }
-  return null;
-}
-
-function countUpdatesWithin(outcome: WeatherOutcome, startTs: number, endTs: number) {
-  let count = 0;
-  for (const point of outcome.points) {
-    if (point.t < startTs) continue;
-    if (point.t > endTs) break;
-    count += 1;
-  }
-  return count;
-}
-
-function maxAbsMoveAfter(outcome: WeatherOutcome, entryTs: number, horizonMs: number) {
-  const entryPoint = lastPointAtOrBefore(outcome, entryTs);
-  if (!entryPoint) return null;
-  let maxMove = 0;
-  let seen = false;
-  const endTs = entryTs + horizonMs;
-  for (const point of outcome.points) {
-    if (point.t < entryTs) continue;
-    if (point.t > endTs) break;
-    seen = true;
-    maxMove = Math.max(maxMove, Math.abs(point.p - entryPoint.p));
-  }
-  return seen ? maxMove : null;
-}
-
-function buildNearLockRows(
-  selectedRun: WeatherRun | null,
-  researchRows: OutcomeResearchRow[],
-  policy: ExecutionPolicy,
-): NearLockBoardRow[] {
-  if (!selectedRun) return [];
-  return researchRows
-    .map((row) => {
-      const entryProb = row.entryProb;
-      const edgeToSettlement = entryProb == null ? null : (row.outcome.isWinner ? 1 : 0) - entryProb;
-      const staleOk = row.staleMinutes != null && row.staleMinutes <= policy.maxStaleMinutes;
-      const updatesOk = row.updates6h >= policy.minUpdates6h;
-      const spreadOk = row.outcome.marketStats.spread == null || row.outcome.marketStats.spread <= 8;
-      const underpriced = entryProb != null && entryProb <= 0.82;
-
-      let verdict: NearLockBoardRow['verdict'] = 'avoid';
-      if (staleOk && updatesOk && spreadOk && underpriced && edgeToSettlement != null && edgeToSettlement >= 0.08) {
-        verdict = 'trade';
-      } else if (staleOk && updatesOk) {
-        verdict = 'watch';
-      }
-
-      const note = !staleOk
-        ? 'feed stale'
-        : !updatesOk
-          ? 'too few prints'
-          : !spreadOk
-            ? 'spread wide'
-            : !underpriced
-              ? 'price already rich'
-              : edgeToSettlement != null && edgeToSettlement >= 0.08
-                ? 'lag still open'
-                : 'thin edge';
-
-      return {
-        outcome: row.outcome,
-        labelKey: bucketKey(row.outcome.label),
-        entryProb,
-        staleMinutes: row.staleMinutes,
-        updates6h: row.updates6h,
-        spread: row.outcome.marketStats.spread,
-        edgeToSettlement,
-        selected: row.selected,
-        isWinner: row.outcome.isWinner,
-        verdict,
-        note,
-      };
-    })
-    .sort((a, b) => {
-      if (a.selected !== b.selected) return a.selected ? -1 : 1;
-      if (a.verdict !== b.verdict) return a.verdict === 'trade' ? -1 : a.verdict === 'watch' ? -1 : 1;
-      return (b.edgeToSettlement ?? -999) - (a.edgeToSettlement ?? -999) || (a.labelKey ?? 0) - (b.labelKey ?? 0);
-    });
-}
-
-function buildAlphaNotes(dataset: WeatherDataset | null): string[] {
-  if (!dataset || dataset.summaryByEntryHour.length === 0) return [];
-  const ranked = [...dataset.summaryByEntryHour].sort((a, b) => b.totalPnl - a.totalPnl);
-  const best = ranked[0];
-  const second = ranked[1] ?? null;
-  const notes: string[] = [];
-
-  if (best.totalPnl > 0) {
-    notes.push(
-      `${dataset.cityLabel} currently backtests best at ${best.entryHours}h, with ${best.tradedCount} trades, ${fmtPct(best.hitRate, 1)} hit rate, and total PnL ${best.totalPnl.toFixed(3)}.`,
-    );
-  } else {
-    notes.push(
-      `${dataset.cityLabel} has no positive entry hour in this window. Treat it as a weak alpha candidate unless the sampling window or rule changes.`,
-    );
-  }
-
-  if (second) {
-    const gap = best.totalPnl - second.totalPnl;
-    if (Math.abs(gap) >= 1) {
-      notes.push(
-        `Entry timing is sensitive here: the gap between the best hour (${best.entryHours}h) and runner-up (${second.entryHours}h) is ${gap.toFixed(3)} PnL.`,
-      );
-    } else {
-      notes.push(`The best two entry hours are relatively close, so this city looks less timing-fragile than Chengdu-style one-hour sweet spots.`);
-    }
-  }
-
-  const pairRatio = best.tradedCount > 0 ? best.pairCount / best.tradedCount : 0;
-  if (pairRatio > 0.5) {
-    notes.push('Most winning trades come from buying two adjacent temperature buckets, so size should be cut for slippage and execution complexity.');
-  } else if (best.singleCount > 0) {
-    notes.push('Single-bucket entries dominate the best hour, which is cleaner operationally and usually easier to size.');
-  }
-
-  return notes.slice(0, 3);
-}
-
-function buildEventBacktestRows(dataset: WeatherDataset | null, entryHours: number | null): EventBacktestRow[] {
-  if (!dataset || entryHours == null) return [];
-  let cumulative = 0;
-  return dataset.events
-    .map((event) => {
-      const run = findRun(event, entryHours);
-      if (!run) return null;
-      cumulative += run.pnl;
-      return {
-        eventSlug: event.eventSlug,
-        date: event.date,
-        winnerLabel: event.winnerLabel,
-        entryHours: run.entryHours,
-        pnl: run.pnl,
-        cumulativePnl: cumulative,
-        didHit: run.didHit,
-        selectedLabels: run.selectedLabels,
-        selectedProbabilitySum: run.selectedProbabilitySum,
-        selectionMode: run.selectionMode,
-        reason: run.reason,
-      };
-    })
-    .filter((row): row is EventBacktestRow => row != null);
-}
-
-function buildResearchRowsForRun(selectedEvent: WeatherEvent | null, selectedRun: WeatherRun | null): OutcomeResearchRow[] {
-  if (!selectedEvent || !selectedRun) return [];
-  return selectedEvent.outcomes
-    .map((outcome) => {
-      const directIdx = selectedRun.selectedLabels.indexOf(outcome.label);
-      const lastPoint = lastPointAtOrBefore(outcome, selectedRun.entryTimestamp);
-      return {
-        outcome,
-        entryProb: directIdx >= 0 ? selectedRun.selectedPrices[directIdx] ?? null : lastPoint?.p ?? null,
-        selected: directIdx >= 0,
-        staleMinutes: lastPoint ? (selectedRun.entryTimestamp - lastPoint.t) / 60000 : null,
-        updates6h: countUpdatesWithin(outcome, selectedRun.entryTimestamp - 6 * 60 * 60 * 1000, selectedRun.entryTimestamp),
-        move1hAfterEntry: maxAbsMoveAfter(outcome, selectedRun.entryTimestamp, 60 * 60 * 1000),
-      };
-    })
-    .sort((a, b) => (b.entryProb ?? -1) - (a.entryProb ?? -1));
-}
-
-function buildExecutionRows(
-  dataset: WeatherDataset | null,
-  entryHours: number | null,
-  policy: ExecutionPolicy,
-): ExecutionEventRow[] {
-  if (!dataset || entryHours == null) return [];
-  let cumulativeRawPnl = 0;
-  let cumulativeConservativePnl = 0;
-
-  return dataset.events
-    .map((event) => {
-      const run = findRun(event, entryHours);
-      if (!run) return null;
-
-      const researchRows = buildResearchRowsForRun(event, run).filter((row) => row.selected);
-      const blockReasons: string[] = [];
-      if (run.selectedLabels.length > 0) {
-        for (const row of researchRows) {
-          if (row.staleMinutes == null || row.staleMinutes > policy.maxStaleMinutes) {
-            blockReasons.push(`${row.outcome.label} stale ${fmtMaybe(row.staleMinutes, 1)}m`);
-          }
-          if (row.updates6h < policy.minUpdates6h) {
-            blockReasons.push(`${row.outcome.label} updates6h=${row.updates6h}`);
-          }
-        }
-      }
-
-      const blockedByPolicy = run.selectedLabels.length > 0 && blockReasons.length > 0;
-      const legs = run.selectedLabels.length;
-      const friction = legs * (policy.slippagePerLeg + policy.feePerLeg);
-      const conservativeCost = run.selectedProbabilitySum + friction;
-      const conservativePnl =
-        run.selectedLabels.length === 0 || blockedByPolicy
-          ? 0
-          : (run.didHit ? 1 : 0) - conservativeCost;
-
-      cumulativeRawPnl += run.pnl;
-      cumulativeConservativePnl += conservativePnl;
-
-      return {
-        eventSlug: event.eventSlug,
-        date: event.date,
-        rawPnl: run.pnl,
-        conservativePnl,
-        cumulativeRawPnl,
-        cumulativeConservativePnl,
-        selectedProbabilitySum: run.selectedProbabilitySum,
-        conservativeCost,
-        didHit: run.didHit,
-        selectedLabels: run.selectedLabels,
-        blockedByPolicy,
-        blockReasons,
-        entryTimestamp: run.entryTimestamp,
-        endTimestamp: new Date(event.endTimeUtc).getTime(),
-      };
-    })
-    .filter((row): row is ExecutionEventRow => row != null);
-}
-
-function buildDailyBuyPointRows(dataset: WeatherDataset | null, entryHours: number): DailyBuyPointRow[] {
-  if (!dataset) return [];
-  return dataset.events
-    .map((event) => {
-      const run = findRun(event, entryHours);
-      if (!run || run.selectedLabels.length === 0) return null;
-      return {
-        date: event.date,
-        entryTimeEdt: fmtEdtTimestamp(run.entryTimeUtc),
-        selection: run.selectedLabels.join(' + '),
-        probabilityPaid: run.selectedProbabilitySum,
-        pnl: run.pnl,
-        didHit: run.didHit,
-        winnerLabel: event.winnerLabel,
-      };
-    })
-    .filter((row): row is DailyBuyPointRow => row != null);
-}
-
-function computeMaxDrawdown(rows: ExecutionEventRow[], key: 'cumulativeRawPnl' | 'cumulativeConservativePnl'): number {
-  let peak = 0;
-  let maxDrawdown = 0;
-  for (const row of rows) {
-    peak = Math.max(peak, row[key]);
-    maxDrawdown = Math.max(maxDrawdown, peak - row[key]);
-  }
-  return maxDrawdown;
-}
-
-function computeMaxConcurrentCapital(rows: ExecutionEventRow[]): number {
-  const events: Array<{ ts: number; delta: number }> = [];
-  for (const row of rows) {
-    if (row.selectedLabels.length === 0 || row.blockedByPolicy) continue;
-    events.push({ ts: row.entryTimestamp, delta: row.conservativeCost });
-    events.push({ ts: row.endTimestamp, delta: -row.conservativeCost });
-  }
-  events.sort((a, b) => a.ts - b.ts || a.delta - b.delta);
-  let current = 0;
-  let max = 0;
-  for (const event of events) {
-    current += event.delta;
-    max = Math.max(max, current);
-  }
-  return max;
-}
-
+import {
+  ORDERBOOK_CAPACITY_URLS,
+  average,
+  buildAlphaNotes,
+  buildDailyBuyPointRows,
+  buildEventBacktestRows,
+  buildExecutionRows,
+  buildNearLockRows,
+  buildResearchRowsForRun,
+  buildStrategyDecision,
+  buildStrategyEventRows,
+  buildStrategyHourSummaries,
+  clamp01,
+  computeMaxConcurrentCapital,
+  computeMaxDrawdown,
+  findRun,
+  firstPointAfter,
+  fmtCompact,
+  fmtMaybe,
+  medianNullable,
+  minNullable,
+  outcomeColor,
+  sumNullable,
+  sumSummary,
+  toneForPnl,
+} from '../weather/researchAnalytics';
+import type {
+  ExecutionPolicy,
+  OutcomeResearchRow,
+  StrategyPolicy,
+} from '../weather/researchAnalytics';
 async function loadJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) {
@@ -520,12 +104,27 @@ export function WeatherResearchPage({
   const [feeInput, setFeeInput] = useState('0.005');
   const [maxStaleMinutesInput, setMaxStaleMinutesInput] = useState('90');
   const [minUpdatesInput, setMinUpdatesInput] = useState('3');
+  const [maxProbabilityInput, setMaxProbabilityInput] = useState('0.82');
+  const [minSignalMarginInput, setMinSignalMarginInput] = useState('0.03');
+  const [maxPreEntryMoveInput, setMaxPreEntryMoveInput] = useState('0.12');
+  const [orderbookCapacity, setOrderbookCapacity] = useState<WeatherOrderbookCapacityDataset | null>(null);
+  const [orderbookStatus, setOrderbookStatus] = useState<LoadState>('loading');
+  const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceTab>(() => {
+    const stored = localStorage.getItem('weather-workspace-tab');
+    return WORKSPACE_TABS.some((tab) => tab.id === stored) ? (stored as WorkspaceTab) : 'overview';
+  });
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('setup');
+
+  useEffect(() => {
+    localStorage.setItem('weather-workspace-tab', activeWorkspace);
+  }, [activeWorkspace]);
 
   function applyDataset(payload: WeatherDataset, sourceLabel: string, progressMessage: string) {
+    const preset = findPresetCity(payload.citySlug);
     setDataset(payload);
-    setCitySlugInput(payload.citySlug);
+    setCitySlugInput(preset?.sourceSlug ?? payload.citySlug);
     setCityLabelInput(payload.cityLabel);
-    setCityPresetValue(findPresetCity(payload.citySlug)?.slug ?? CUSTOM_CITY_VALUE);
+    setCityPresetValue(preset?.slug ?? CUSTOM_CITY_VALUE);
     setAnchorDateInput(payload.anchorDate);
     setDaysInput(String(payload.days));
     setEntryHoursInput(payload.entryHours.join(','));
@@ -600,7 +199,7 @@ export function WeatherResearchPage({
         if (cancelled) return;
         setDatasetCache({ [payload.citySlug]: payload });
         applyDataset(payload, 'local archive', `Loaded local archive for ${payload.cityLabel} (${payload.events.length} resolved event(s)).`);
-      } catch (err) {
+      } catch {
         if (cancelled) return;
         try {
           const payload = await loadJson<WeatherDataset>(LEGACY_DATA_URL);
@@ -625,11 +224,63 @@ export function WeatherResearchPage({
     };
   }, []);
 
+  useEffect(() => {
+    const citySlug = dataset?.citySlug ?? '';
+    const entryHours = selectedEntryHours ?? -1;
+    const url = ORDERBOOK_CAPACITY_URLS[citySlug]?.[entryHours];
+    let cancelled = false;
+
+    async function loadOrderbook() {
+      await Promise.resolve();
+      if (cancelled) return;
+      if (!url) {
+        setOrderbookCapacity(null);
+        setOrderbookStatus('error');
+        return;
+      }
+
+      setOrderbookStatus('loading');
+      try {
+        const payload = await loadJson<WeatherOrderbookCapacityDataset>(url);
+        if (cancelled) return;
+        setOrderbookCapacity(payload);
+        setOrderbookStatus('ready');
+      } catch {
+        if (cancelled) return;
+        setOrderbookCapacity(null);
+        setOrderbookStatus('error');
+      }
+    }
+
+    void loadOrderbook();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dataset?.citySlug, selectedEntryHours]);
+
   const selectedEvent = useMemo(
     () => dataset?.events.find((event) => event.eventSlug === selectedEventSlug) ?? dataset?.events[dataset.events.length - 1] ?? null,
     [dataset, selectedEventSlug],
   );
   const selectedRun = useMemo(() => findRun(selectedEvent, selectedEntryHours), [selectedEvent, selectedEntryHours]);
+  const selectedOrderbookRows = useMemo<WeatherOrderbookCapacityRow[]>(() => {
+    if (!selectedEvent || !orderbookCapacity || !selectedRun) return [];
+    const labels = new Set(selectedRun.selectedLabels);
+    return orderbookCapacity.rows.filter(
+      (row) => row.eventSlug === selectedEvent.eventSlug && row.targetDate === selectedEvent.date && labels.has(row.bucketLabel),
+    );
+  }, [selectedEvent, orderbookCapacity, selectedRun]);
+  const madridOrderbookByDate = useMemo(() => {
+    const map = new Map<string, WeatherOrderbookCapacityRow[]>();
+    if (!orderbookCapacity) return map;
+    for (const row of orderbookCapacity.rows) {
+      const arr = map.get(row.targetDate) ?? [];
+      arr.push(row);
+      map.set(row.targetDate, arr);
+    }
+    return map;
+  }, [orderbookCapacity]);
   const totals = useMemo(() => sumSummary(dataset?.summaryByEntryHour ?? []), [dataset]);
 
   const chartSeries = useMemo<ChartSeries[]>(() => {
@@ -695,6 +346,16 @@ export function WeatherResearchPage({
     }),
     [slippageInput, feeInput, maxStaleMinutesInput, minUpdatesInput],
   );
+  const strategyPolicy = useMemo<StrategyPolicy>(
+    () => ({
+      ...executionPolicy,
+      maxProbabilitySum: Number.isFinite(Number(maxProbabilityInput)) ? Number(maxProbabilityInput) : 0.82,
+      minSignalMargin: Number.isFinite(Number(minSignalMarginInput)) ? Number(minSignalMarginInput) : 0.03,
+      maxPreEntryMove6h: Number.isFinite(Number(maxPreEntryMoveInput)) ? Number(maxPreEntryMoveInput) : 0.12,
+      requireAdjacentPair: true,
+    }),
+    [executionPolicy, maxProbabilityInput, minSignalMarginInput, maxPreEntryMoveInput],
+  );
 
   const backtestOverviewSeries = useMemo<ChartSeries[]>(() => {
     if (eventRows.length === 0) return [];
@@ -753,6 +414,42 @@ export function WeatherResearchPage({
   }, [executionRows]);
 
   const researchRows = useMemo<OutcomeResearchRow[]>(() => buildResearchRowsForRun(selectedEvent, selectedRun), [selectedEvent, selectedRun]);
+  const strategyDecision = useMemo(
+    () => buildStrategyDecision(selectedEvent, selectedRun, researchRows, dataset?.threshold ?? 0.5, strategyPolicy),
+    [selectedEvent, selectedRun, researchRows, dataset, strategyPolicy],
+  );
+  const strategyHourSummaries = useMemo(() => buildStrategyHourSummaries(dataset, strategyPolicy), [dataset, strategyPolicy]);
+  const strategyHourSummaryMap = useMemo(
+    () => new Map(strategyHourSummaries.map((item) => [item.entryHours, item])),
+    [strategyHourSummaries],
+  );
+  const bestRiskAdjustedEntryHour = useMemo(() => {
+    if (strategyHourSummaries.length === 0) return null;
+    return [...strategyHourSummaries].sort(
+      (a, b) => b.gatedTotalPnl - a.gatedTotalPnl || b.tradeCount - a.tradeCount || a.entryHours - b.entryHours,
+    )[0]?.entryHours ?? null;
+  }, [strategyHourSummaries]);
+  const strategyEventRows = useMemo(
+    () => buildStrategyEventRows(dataset, selectedEntryHours, strategyPolicy),
+    [dataset, selectedEntryHours, strategyPolicy],
+  );
+  const strategyOverviewSeries = useMemo<ChartSeries[]>(() => {
+    if (strategyEventRows.length === 0 || eventRows.length === 0) return [];
+    return [
+      {
+        label: 'raw cumulative pnl',
+        color: '#9a6b1f',
+        dashed: true,
+        opacity: 0.74,
+        points: eventRows.map((row, index) => ({ x: index, y: row.cumulativePnl })),
+      },
+      {
+        label: 'risk-adjusted cumulative pnl',
+        color: CHART.position,
+        points: strategyEventRows.map((row, index) => ({ x: index, y: row.cumulativeGatedPnl })),
+      },
+    ];
+  }, [strategyEventRows, eventRows]);
 
   const selectedResearchRows = useMemo(() => researchRows.filter((row) => row.selected), [researchRows]);
 
@@ -859,9 +556,10 @@ export function WeatherResearchPage({
   }, [nearLockRows, selectedRun, executionPolicy]);
 
   const isCustomCity = cityPresetValue === CUSTOM_CITY_VALUE;
+  const selectedArchiveSlug = cityPresetValue === CUSTOM_CITY_VALUE ? citySlugInput.trim().toLowerCase() : cityPresetValue;
   const selectedPresetHasArchive = useMemo(
-    () => !!library?.cities.some((entry) => entry.citySlug === citySlugInput.trim().toLowerCase()),
-    [library, citySlugInput],
+    () => !!library?.cities.some((entry) => entry.citySlug === selectedArchiveSlug),
+    [library, selectedArchiveSlug],
   );
 
   function submitGenerator() {
@@ -912,7 +610,7 @@ export function WeatherResearchPage({
     }
     const preset = findPresetCity(value);
     if (!preset) return;
-    setCitySlugInput(preset.slug);
+    setCitySlugInput(preset.sourceSlug ?? preset.slug);
     setCityLabelInput(preset.label);
     void loadBundledDataset(preset.slug).catch((err: unknown) => {
       setError(err instanceof Error ? err.message : String(err));
@@ -1008,7 +706,21 @@ export function WeatherResearchPage({
 
         <section className="col-config weather-panel">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div className="card" style={{ padding: 16 }}>
+            <TabBar
+              ariaLabel="Weather sidebar"
+              items={SIDEBAR_TABS}
+              value={sidebarTab}
+              onChange={setSidebarTab}
+              compact
+            />
+            <div
+              id="weather-sidebar-setup-panel"
+              role="tabpanel"
+              aria-labelledby="weather-sidebar-setup-tab"
+              hidden={sidebarTab !== 'setup'}
+              className="card weather-tab-panel"
+              style={{ padding: 16 }}
+            >
               <div className="eyebrow" style={{ marginBottom: 8 }}>
                 Research Controls
               </div>
@@ -1064,6 +776,18 @@ export function WeatherResearchPage({
                   <span className="field-label">Min updates 6h</span>
                   <input className="input mono" type="number" min={0} step={1} value={minUpdatesInput} onChange={(e) => setMinUpdatesInput(e.target.value)} />
                 </label>
+                <label>
+                  <span className="field-label">Max paid prob</span>
+                  <input className="input mono" type="number" min={0.01} max={0.99} step={0.01} value={maxProbabilityInput} onChange={(e) => setMaxProbabilityInput(e.target.value)} />
+                </label>
+                <label>
+                  <span className="field-label">Min signal margin</span>
+                  <input className="input mono" type="number" min={0.01} max={0.5} step={0.01} value={minSignalMarginInput} onChange={(e) => setMinSignalMarginInput(e.target.value)} />
+                </label>
+                <label>
+                  <span className="field-label">Max pre-entry 6h move</span>
+                  <input className="input mono" type="number" min={0.01} max={0.99} step={0.01} value={maxPreEntryMoveInput} onChange={(e) => setMaxPreEntryMoveInput(e.target.value)} />
+                </label>
               </div>
               <div style={{ display: 'flex', gap: 10, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                 <button className="btn btn-primary" type="button" onClick={submitGenerator} disabled={status === 'loading'}>
@@ -1074,7 +798,7 @@ export function WeatherResearchPage({
                   type="button"
                   disabled={!selectedPresetHasArchive}
                   onClick={() => {
-                    void loadBundledDataset(citySlugInput.trim().toLowerCase()).catch((err: unknown) => {
+                    void loadBundledDataset(selectedArchiveSlug).catch((err: unknown) => {
                       setError(err instanceof Error ? err.message : String(err));
                       setStatus('error');
                     });
@@ -1097,6 +821,9 @@ export function WeatherResearchPage({
                     setFeeInput('0.005');
                     setMaxStaleMinutesInput('90');
                     setMinUpdatesInput('3');
+                    setMaxProbabilityInput('0.82');
+                    setMinSignalMarginInput('0.03');
+                    setMaxPreEntryMoveInput('0.12');
                     void loadBundledDataset('chengdu').catch(() => undefined);
                   }}
                 >
@@ -1113,6 +840,13 @@ export function WeatherResearchPage({
               ) : null}
             </div>
 
+            <div
+              id="weather-sidebar-explore-panel"
+              role="tabpanel"
+              aria-labelledby="weather-sidebar-explore-tab"
+              hidden={sidebarTab !== 'explore'}
+              className="weather-tab-panel weather-tab-stack"
+            >
             {cityBoard.length > 0 ? (
               <div className="card" style={{ padding: 16 }}>
                 <div className="eyebrow" style={{ marginBottom: 8 }}>
@@ -1127,8 +861,9 @@ export function WeatherResearchPage({
                         type="button"
                         className={`weather-city-card ${active ? 'active' : ''}`}
                         onClick={() => {
+                          const preset = findPresetCity(entry.citySlug);
                           setCityPresetValue(entry.citySlug);
-                          setCitySlugInput(entry.citySlug);
+                          setCitySlugInput(preset?.sourceSlug ?? entry.citySlug);
                           setCityLabelInput(entry.cityLabel);
                           void loadBundledDataset(entry.citySlug, entry.path).catch((err: unknown) => {
                             setError(err instanceof Error ? err.message : String(err));
@@ -1159,6 +894,7 @@ export function WeatherResearchPage({
                   <div className="weather-hour-grid">
                     {dataset.summaryByEntryHour.map((item) => {
                       const active = item.entryHours === selectedEntryHours;
+                      const gated = strategyHourSummaryMap.get(item.entryHours) ?? null;
                       return (
                         <button
                           key={item.entryHours}
@@ -1174,7 +910,10 @@ export function WeatherResearchPage({
                             {item.totalPnl.toFixed(3)}
                           </div>
                           <div className="muted" style={{ fontSize: 12 }}>
-                            cum pnl · hit {fmtPct(item.hitRate, 1)} · avg {item.avgPnl.toFixed(3)}
+                            raw hit {fmtPct(item.hitRate, 1)} · avg {item.avgPnl.toFixed(3)}
+                          </div>
+                          <div className="muted" style={{ fontSize: 12 }}>
+                            risk pnl {gated?.gatedTotalPnl.toFixed(3) ?? '-'} · buy {gated?.tradeCount ?? 0}/{gated?.rawTradeCount ?? item.tradedCount}
                           </div>
                         </button>
                       );
@@ -1228,6 +967,7 @@ export function WeatherResearchPage({
                 </div>
               </>
             ) : null}
+            </div>
           </div>
         </section>
 
@@ -1265,7 +1005,186 @@ export function WeatherResearchPage({
                 </div>
               </div>
 
-              <section className="weather-nearlock card rise">
+              <TabBar
+                ariaLabel="Weather workspace"
+                items={WORKSPACE_TABS.map((tab) => ({
+                  ...tab,
+                  badge:
+                    tab.id === 'signal'
+                      ? selectedRun.selectedLabels.length
+                      : tab.id === 'liquidity'
+                        ? selectedOrderbookRows.length
+                        : tab.id === 'risk'
+                          ? executionSummary.blockedTrades
+                          : tab.id === 'audit'
+                            ? eventRows.length
+                            : undefined,
+                }))}
+                value={activeWorkspace}
+                onChange={setActiveWorkspace}
+              />
+
+              <section
+                id="weather-workspace-overview-panel"
+                role="tabpanel"
+                aria-labelledby="weather-workspace-overview-tab"
+                hidden={activeWorkspace !== 'overview'}
+                className="weather-ticket card rise weather-tab-panel"
+              >
+                <div className="weather-ticket-header">
+                  <div>
+                    <div className="eyebrow">Decision Ticket</div>
+                    <h3>Can this setup actually be bought?</h3>
+                    <p className="muted" style={{ margin: '8px 0 0' }}>
+                      This is the strategy-side answer, not just the raw backtest answer. It applies freshness, cadence, cost, adjacency, and pre-entry volatility guardrails before allowing the trade.
+                    </p>
+                  </div>
+                  <div className={`weather-ticket-badge ${strategyDecision.verdict}`}>
+                    <span className="eyebrow">Verdict</span>
+                    <strong>
+                      {strategyDecision.verdict === 'trade'
+                        ? 'BUY'
+                        : strategyDecision.verdict === 'watch'
+                          ? 'WATCH'
+                          : 'SKIP'}
+                    </strong>
+                    <span>{strategyDecision.headline}</span>
+                  </div>
+                </div>
+
+                <div className="weather-ticket-grid">
+                  <div className="weather-ticket-card">
+                    <span className="eyebrow">Price Paid</span>
+                    <strong>{fmtPct(selectedRun.selectedProbabilitySum, 1)}</strong>
+                    <span>max allowed {fmtPct(strategyPolicy.maxProbabilitySum, 0)}</span>
+                  </div>
+                  <div className="weather-ticket-card">
+                    <span className="eyebrow">Signal Margin</span>
+                    <strong>{strategyDecision.thresholdMargin == null ? '-' : fmtPct(strategyDecision.thresholdMargin, 1)}</strong>
+                    <span>min required {fmtPct(strategyPolicy.minSignalMargin, 0)}</span>
+                  </div>
+                  <div className="weather-ticket-card">
+                    <span className="eyebrow">Feed Freshness</span>
+                    <strong>{fmtMaybe(strategyDecision.avgStaleMinutes, 1)}m</strong>
+                    <span>cap {strategyPolicy.maxStaleMinutes}m</span>
+                  </div>
+                  <div className="weather-ticket-card">
+                    <span className="eyebrow">Updates / 6h</span>
+                    <strong>{fmtMaybe(strategyDecision.avgUpdates6h, 1)}</strong>
+                    <span>floor {strategyPolicy.minUpdates6h}</span>
+                  </div>
+                  <div className="weather-ticket-card">
+                    <span className="eyebrow">Pre-entry 6h Move</span>
+                    <strong>{strategyDecision.avgMove6hBeforeEntry == null ? '-' : fmtPct(strategyDecision.avgMove6hBeforeEntry, 1)}</strong>
+                    <span>cap {fmtPct(strategyPolicy.maxPreEntryMove6h, 0)}</span>
+                  </div>
+                  <div className="weather-ticket-card">
+                    <span className="eyebrow">Pair Shape</span>
+                    <strong>{strategyDecision.pairAdjacent ? 'adjacent' : 'broken'}</strong>
+                    <span>{selectedRun.selectedLabels.length <= 1 ? 'single bucket' : 'pair structure check'}</span>
+                  </div>
+                </div>
+
+                {strategyDecision.reasons.length > 0 ? (
+                  <div className="weather-ticket-flags">
+                    {strategyDecision.reasons.map((reason) => (
+                      <div key={reason} className="weather-ticket-flag danger">
+                        {reason}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {strategyDecision.warnings.length > 0 ? (
+                  <div className="weather-ticket-flags">
+                    {strategyDecision.warnings.map((warning) => (
+                      <div key={warning} className="weather-ticket-flag watch">
+                        {warning}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+
+              <section
+                id="weather-workspace-liquidity-panel"
+                role="tabpanel"
+                aria-labelledby="weather-workspace-liquidity-tab"
+                hidden={activeWorkspace !== 'liquidity'}
+                className="card weather-tab-panel"
+                style={{ padding: 16 }}
+              >
+                <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>
+                  <div>
+                    <div className="eyebrow">Historical Entry Depth</div>
+                    <h3 style={{ fontSize: 16 }}>How much size looked available near the buy point?</h3>
+                  </div>
+                  <div className="muted" style={{ fontSize: 12, maxWidth: 460, textAlign: 'right' }}>
+                    `snapshot size` is the visible PMXT size attached to the last selected entry snapshot. Full ladder fields appear only when a nearby `book` snapshot was captured.
+                  </div>
+                </header>
+                {orderbookStatus === 'ready' && selectedOrderbookRows.length > 0 ? (
+                  <>
+                    <div className="weather-capacity-grid">
+                      {selectedOrderbookRows.map((row) => (
+                        <div key={`${row.targetDate}-${row.bucketLabel}`} className="weather-capacity-item">
+                          <span className="eyebrow">{row.bucketLabel}</span>
+                          <strong>{row.snapshotSize == null ? '-' : fmtCompact(row.snapshotSize, 1)} sh</strong>
+                          <span className="muted">
+                            ask {row.snapshotBestAsk == null ? '-' : fmtPct(row.snapshotBestAsk, 1)}
+                            {row.cumSizePlus1c != null ? ` · +1c ${fmtCompact(row.cumSizePlus1c, 1)} sh` : ''}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="weather-event-table-wrap" style={{ marginTop: 12 }}>
+                      <table className="weather-event-table">
+                        <thead>
+                          <tr>
+                            <th>Bucket</th>
+                            <th>Paid</th>
+                            <th>Snapshot Ask</th>
+                            <th>Snapshot Size</th>
+                            <th>Top Ask</th>
+                            <th>Size +1c</th>
+                            <th>Size +2c</th>
+                            <th>Size +5c</th>
+                            <th>Book Age</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedOrderbookRows.map((row) => (
+                            <tr key={`${row.targetDate}-${row.bucketLabel}`}>
+                              <td>{row.bucketLabel}</td>
+                              <td className="mono">{fmtPct(row.selectedProbability, 1)}</td>
+                              <td className="mono">{row.snapshotBestAsk == null ? '-' : fmtPct(row.snapshotBestAsk, 1)}</td>
+                              <td className="mono">{row.snapshotSize == null ? '-' : fmtCompact(row.snapshotSize, 1)}</td>
+                              <td className="mono">{row.topAskPrice == null ? '-' : fmtPct(row.topAskPrice, 1)}</td>
+                              <td className="mono">{row.cumSizePlus1c == null ? '-' : fmtCompact(row.cumSizePlus1c, 1)}</td>
+                              <td className="mono">{row.cumSizePlus2c == null ? '-' : fmtCompact(row.cumSizePlus2c, 1)}</td>
+                              <td className="mono">{row.cumSizePlus5c == null ? '-' : fmtCompact(row.cumSizePlus5c, 1)}</td>
+                              <td className="mono">{fmtMaybe(row.bookAgeMinutes, 1)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                ) : (
+                  <p className="muted" style={{ margin: 0 }}>
+                    {dataset.citySlug === 'madrid' && selectedEntryHours === 36
+                      ? 'No nearby PMXT ladder snapshot was captured for this selected day, so only the price snapshot is available.'
+                      : 'Historical orderbook-capacity overlay is currently wired for Madrid 36h PMXT replay first.'}
+                  </p>
+                )}
+              </section>
+
+              <section
+                id="weather-workspace-signal-panel"
+                role="tabpanel"
+                aria-labelledby="weather-workspace-signal-tab"
+                hidden={activeWorkspace !== 'signal'}
+                className="weather-nearlock card rise weather-tab-panel"
+              >
                 <div className="weather-nearlock-header">
                   <div>
                     <div className="weather-nearlock-kicker">Near-Lock Console</div>
@@ -1356,7 +1275,7 @@ export function WeatherResearchPage({
                 </div>
               </section>
 
-              <section className="card" style={{ padding: 16 }}>
+              <section className="card weather-tab-panel" hidden={activeWorkspace !== 'overview'} style={{ padding: 16 }}>
                 <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>
                   <div>
                     <div className="eyebrow">Backtest Overview</div>
@@ -1413,7 +1332,75 @@ export function WeatherResearchPage({
                 </div>
               </section>
 
-              <section className="card" style={{ padding: 16 }}>
+              <section
+                id="weather-workspace-risk-panel"
+                role="tabpanel"
+                aria-labelledby="weather-workspace-risk-tab"
+                hidden={activeWorkspace !== 'risk'}
+                className="card weather-tab-panel"
+                style={{ padding: 16 }}
+              >
+                <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>
+                  <div>
+                    <div className="eyebrow">Risk-Adjusted Strategy</div>
+                    <h3 style={{ fontSize: 16 }}>What survives after guardrails?</h3>
+                  </div>
+                  <div className="muted" style={{ fontSize: 12, maxWidth: 440, textAlign: 'right' }}>
+                    This view answers whether 36h is actually buyable, not just profitable on paper. Raw trades only count if they pass cost, freshness, cadence, adjacency, and pre-entry volatility checks.
+                  </div>
+                </header>
+                <div className="weather-backtest-summary">
+                  <div className="weather-capacity-item">
+                    <span className="eyebrow">Best Risk Hour</span>
+                    <strong>{bestRiskAdjustedEntryHour == null ? '-' : `${bestRiskAdjustedEntryHour}h`}</strong>
+                  </div>
+                  <div className="weather-capacity-item">
+                    <span className="eyebrow">Risk PnL</span>
+                    <strong className={(strategyHourSummaryMap.get(selectedEntryHours ?? -1)?.gatedTotalPnl ?? 0) >= 0 ? 'pos' : 'neg'}>
+                      {(strategyHourSummaryMap.get(selectedEntryHours ?? -1)?.gatedTotalPnl ?? 0).toFixed(3)}
+                    </strong>
+                    <span className="muted">selected entry hour after guardrails</span>
+                  </div>
+                  <div className="weather-capacity-item">
+                    <span className="eyebrow">Live Trades</span>
+                    <strong>{strategyHourSummaryMap.get(selectedEntryHours ?? -1)?.tradeCount ?? 0}</strong>
+                    <span className="muted">passed as BUY</span>
+                  </div>
+                  <div className="weather-capacity-item">
+                    <span className="eyebrow">Watch / Skip</span>
+                    <strong>
+                      {(strategyHourSummaryMap.get(selectedEntryHours ?? -1)?.watchCount ?? 0)}/
+                      {(strategyHourSummaryMap.get(selectedEntryHours ?? -1)?.skipCount ?? 0)}
+                    </strong>
+                    <span className="muted">borderline / blocked</span>
+                  </div>
+                </div>
+                <div style={{ marginTop: 14 }}>
+                  <LineChart
+                    series={strategyOverviewSeries}
+                    markers={
+                      selectedEvent
+                        ? [
+                            {
+                              x: strategyEventRows.findIndex((row) => row.eventSlug === selectedEvent.eventSlug),
+                              y: strategyEventRows.find((row) => row.eventSlug === selectedEvent.eventSlug)?.cumulativeGatedPnl ?? 0,
+                              color: CHART.text,
+                              label: 'selected',
+                            },
+                          ].filter((marker) => marker.x >= 0)
+                        : []
+                    }
+                    height={260}
+                    xFormat={(value) => {
+                      const row = strategyEventRows[Math.round(value)];
+                      return row ? fmtDateShort(row.date) : '';
+                    }}
+                    yFormat={(value) => value.toFixed(2)}
+                  />
+                </div>
+              </section>
+
+              <section className="card weather-tab-panel" hidden={activeWorkspace !== 'risk'} style={{ padding: 16 }}>
                 <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>
                   <div>
                     <div className="eyebrow">Execution Reality Check</div>
@@ -1484,7 +1471,14 @@ export function WeatherResearchPage({
                 </div>
               </section>
 
-              <section className="card" style={{ padding: 16 }}>
+              <section
+                id="weather-workspace-audit-panel"
+                role="tabpanel"
+                aria-labelledby="weather-workspace-audit-tab"
+                hidden={activeWorkspace !== 'audit'}
+                className="card weather-tab-panel"
+                style={{ padding: 16 }}
+              >
                 <div className="eyebrow" style={{ marginBottom: 8 }}>
                   Event Timeline
                 </div>
@@ -1493,6 +1487,9 @@ export function WeatherResearchPage({
                     <thead>
                       <tr>
                         <th>Date</th>
+                        <th>Verdict</th>
+                        <th>Risk PnL</th>
+                        <th>Risk Cum</th>
                         <th>Raw</th>
                         <th>Cons.</th>
                         <th>Cons. Cum</th>
@@ -1505,6 +1502,7 @@ export function WeatherResearchPage({
                     </thead>
                     <tbody>
                       {[...executionRows].reverse().map((row) => {
+                        const strategyRow = strategyEventRows.find((item) => item.eventSlug === row.eventSlug);
                         const active = row.eventSlug === selectedEvent.eventSlug;
                         return (
                           <tr
@@ -1514,6 +1512,9 @@ export function WeatherResearchPage({
                             title={row.blockReasons.join(' | ') || 'passed policy'}
                           >
                             <td className="mono">{fmtDateShort(row.date)}</td>
+                            <td>{strategyRow?.verdict ?? '-'}</td>
+                            <td className={`mono ${(strategyRow?.gatedPnl ?? 0) >= 0 ? 'pos' : 'neg'}`}>{(strategyRow?.gatedPnl ?? 0).toFixed(3)}</td>
+                            <td className={`mono ${(strategyRow?.cumulativeGatedPnl ?? 0) >= 0 ? 'pos' : 'neg'}`}>{(strategyRow?.cumulativeGatedPnl ?? 0).toFixed(3)}</td>
                             <td className={`mono ${row.rawPnl >= 0 ? 'pos' : 'neg'}`}>{row.rawPnl.toFixed(3)}</td>
                             <td className={`mono ${row.conservativePnl >= 0 ? 'pos' : 'neg'}`}>{row.conservativePnl.toFixed(3)}</td>
                             <td className={`mono ${row.cumulativeConservativePnl >= 0 ? 'pos' : 'neg'}`}>{row.cumulativeConservativePnl.toFixed(3)}</td>
@@ -1531,7 +1532,7 @@ export function WeatherResearchPage({
               </section>
 
               <div className="weather-research-grid">
-                <section className="card" style={{ padding: 16 }}>
+                <section className="card weather-tab-panel" hidden={activeWorkspace !== 'overview'} style={{ padding: 16 }}>
                   <div className="eyebrow" style={{ marginBottom: 8 }}>
                     Alpha Notes
                   </div>
@@ -1544,7 +1545,7 @@ export function WeatherResearchPage({
                   </div>
                 </section>
 
-                <section className="card" style={{ padding: 16 }}>
+                <section className="card weather-tab-panel" hidden={activeWorkspace !== 'liquidity'} style={{ padding: 16 }}>
                   <div className="eyebrow" style={{ marginBottom: 8 }}>
                     Capacity & Friction
                   </div>
@@ -1570,6 +1571,10 @@ export function WeatherResearchPage({
                       <strong>{fmtMaybe(capacitySummary.avgStaleMinutes, 1)}</strong>
                     </div>
                     <div className="weather-capacity-item">
+                      <span className="eyebrow">Pre-entry 6h Move</span>
+                      <strong>{selectedResearchRows.length > 0 ? fmtPct(average(selectedResearchRows.map((row) => row.move6hBeforeEntry)) ?? 0, 1) : '-'}</strong>
+                    </div>
+                    <div className="weather-capacity-item">
                       <span className="eyebrow">1h Move</span>
                       <strong>{capacitySummary.avgMove1h == null ? '-' : fmtPct(capacitySummary.avgMove1h, 1)}</strong>
                     </div>
@@ -1581,7 +1586,7 @@ export function WeatherResearchPage({
               </div>
 
               {dataset.citySlug === 'madrid' && madridDailyBuyRows.length > 0 ? (
-                <section className="card" style={{ padding: 16 }}>
+                <section className="card weather-tab-panel" hidden={activeWorkspace !== 'liquidity'} style={{ padding: 16 }}>
                   <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>
                     <div>
                       <div className="eyebrow">36h Daily Buy Points</div>
@@ -1599,23 +1604,36 @@ export function WeatherResearchPage({
                           <th>EDT Buy Time</th>
                           <th>Buy</th>
                           <th>Paid</th>
+                          <th>Snapshot Size</th>
+                          <th>Size +1c</th>
+                          <th>Book Age</th>
                           <th>PnL</th>
                           <th>Hit</th>
                           <th>Winner</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {[...madridDailyBuyRows].reverse().map((row) => (
+                        {[...madridDailyBuyRows].reverse().map((row) => {
+                          const depthRows = madridOrderbookByDate.get(row.date) ?? [];
+                          const snapshotSize = depthRows.reduce((acc, item) => acc + (item.snapshotSize ?? 0), 0);
+                          const plus1c = depthRows.some((item) => item.cumSizePlus1c != null)
+                            ? depthRows.reduce((acc, item) => acc + (item.cumSizePlus1c ?? 0), 0)
+                            : null;
+                          const bookAge = average(depthRows.map((item) => item.bookAgeMinutes));
+                          return (
                           <tr key={`${row.date}-${row.entryTimeEdt}`}>
                             <td className="mono">{fmtDateShort(row.date)}</td>
                             <td className="mono">{row.entryTimeEdt}</td>
                             <td>{row.selection}</td>
                             <td className="mono">{fmtPct(row.probabilityPaid, 1)}</td>
+                            <td className="mono">{depthRows.length > 0 ? fmtCompact(snapshotSize, 1) : '-'}</td>
+                            <td className="mono">{plus1c == null ? '-' : fmtCompact(plus1c, 1)}</td>
+                            <td className="mono">{fmtMaybe(bookAge, 1)}</td>
                             <td className={`mono ${row.pnl >= 0 ? 'pos' : 'neg'}`}>{row.pnl.toFixed(3)}</td>
                             <td>{row.didHit ? 'Yes' : 'No'}</td>
                             <td>{row.winnerLabel ?? '-'}</td>
                           </tr>
-                        ))}
+                        )})}
                       </tbody>
                     </table>
                   </div>
@@ -1625,7 +1643,7 @@ export function WeatherResearchPage({
                 </section>
               ) : null}
 
-              <section className="card" style={{ padding: 16 }}>
+              <section className="card weather-tab-panel" hidden={activeWorkspace !== 'signal'} style={{ padding: 16 }}>
                 <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>
                   <div>
                     <div className="eyebrow">Price History</div>
@@ -1645,7 +1663,7 @@ export function WeatherResearchPage({
                 />
               </section>
 
-              <div className="weather-detail-grid">
+              <div className="weather-detail-grid weather-tab-panel" hidden={activeWorkspace !== 'signal'}>
                 <section className="card" style={{ padding: 16 }}>
                   <div className="eyebrow" style={{ marginBottom: 8 }}>
                     Why It Bought
@@ -1685,7 +1703,7 @@ export function WeatherResearchPage({
                 </section>
               </div>
 
-              <section className="card" style={{ padding: 16 }}>
+              <section className="card weather-tab-panel" hidden={activeWorkspace !== 'liquidity'} style={{ padding: 16 }}>
                 <div className="eyebrow" style={{ marginBottom: 8 }}>
                   Entry Snapshot & Liquidity Proxies
                 </div>
@@ -1753,7 +1771,7 @@ export function WeatherResearchPage({
                 </p>
               </section>
 
-              <section className="card" style={{ padding: 16 }}>
+              <section className="card weather-tab-panel" hidden={activeWorkspace !== 'liquidity'} style={{ padding: 16 }}>
                 <div className="eyebrow" style={{ marginBottom: 8 }}>
                   Execution Notes
                 </div>

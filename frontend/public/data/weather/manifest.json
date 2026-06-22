@@ -128,6 +128,24 @@
       "bestTotalPnl": 6.070000000000001
     },
     {
+      "citySlug": "madrid-latest-proxy",
+      "cityLabel": "Madrid Latest · Price Proxy",
+      "path": "/data/weather/madrid-latest-proxy.json",
+      "anchorDate": "2026-06-20",
+      "days": 8,
+      "entryHours": [
+        6.0,
+        12.0,
+        18.0,
+        24.0,
+        36.0
+      ],
+      "threshold": 0.5,
+      "eventCount": 8,
+      "bestEntryHour": 36.0,
+      "bestTotalPnl": 0.98
+    },
+    {
       "citySlug": "paris",
       "cityLabel": "Paris",
       "path": "/data/weather/paris.json",

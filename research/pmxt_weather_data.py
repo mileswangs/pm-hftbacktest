@@ -461,6 +461,11 @@ def _parse_args() -> argparse.Namespace:
     catalog_parser.add_argument("--start-date", required=True)
     catalog_parser.add_argument("--end-date", required=True)
     catalog_parser.add_argument("--output", default=str(default_catalog_path()))
+    catalog_parser.add_argument(
+        "--merge",
+        action="store_true",
+        help="Replace matching city/date slices while preserving other records in an existing catalog.",
+    )
 
     extract_parser = sub.add_parser("extract", help="Fetch and clean PMXT weather-only parquet slices.")
     extract_parser.add_argument("--catalog", default=str(default_catalog_path()))
@@ -486,6 +491,15 @@ def _command_catalog(args: argparse.Namespace) -> None:
         end_date=_parse_date(args.end_date),
     )
     output_path = Path(args.output)
+    if args.merge and output_path.exists():
+        existing = load_catalog(output_path)
+        replaced_slices = {(row.city_slug, row.target_date) for row in rows}
+        rows = [
+            row
+            for row in existing
+            if (row.city_slug, row.target_date) not in replaced_slices
+        ] + rows
+        rows.sort(key=lambda row: (row.target_date, row.city_slug, row.bucket_label))
     save_catalog(rows, output_path)
     print(f"catalog_records={len(rows)}")
     print(f"catalog_path={output_path}")

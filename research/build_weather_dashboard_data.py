@@ -96,6 +96,11 @@ def _output_default_path() -> Path:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--city-slug", default="chengdu")
+    parser.add_argument(
+        "--dataset-slug",
+        default="",
+        help="Optional frontend dataset id when it should differ from the Polymarket city slug.",
+    )
     parser.add_argument("--city-label", default="Chengdu")
     parser.add_argument("--anchor-date", default="2026-06-19")
     parser.add_argument("--days", type=int, default=17)
@@ -299,6 +304,13 @@ def main() -> None:
         threshold=threshold,
         warehouse_db=args.warehouse_db or None,
     )
+    if args.dataset_slug:
+        payload["citySlug"] = args.dataset_slug
+        payload["dataSource"] = "Public price-history proxy"
+        payload["dataSourceDetail"] = (
+            "Latest resolved events reconstructed from public CLOB last-price history; "
+            "not a historical best-ask or orderbook replay."
+        )
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)

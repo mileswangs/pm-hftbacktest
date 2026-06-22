@@ -4,14 +4,10 @@ import { WeatherResearchPage } from './pages/WeatherResearchPage';
 import type { AppMode } from './components/TopBar';
 
 export default function App() {
-  const [mode, setMode] = useState<AppMode>('weather');
-
-  useEffect(() => {
+  const [mode, setMode] = useState<AppMode>(() => {
     const raw = localStorage.getItem('pm-app-mode');
-    if (raw === 'dashboard' || raw === 'weather') {
-      setMode(raw);
-    }
-  }, []);
+    return raw === 'dashboard' || raw === 'weather' ? raw : 'weather';
+  });
 
   useEffect(() => {
     localStorage.setItem('pm-app-mode', mode);

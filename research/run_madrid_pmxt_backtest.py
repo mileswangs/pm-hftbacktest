@@ -16,7 +16,6 @@ from pmxt_weather_backtest import EntrySnapshotRow, run_pmxt_weather_backtest
 OUTPUT_DIR = Path(__file__).resolve().parent / "data" / "pmxt_weather"
 ENTRY_HOURS = [6.0, 12.0, 18.0, 24.0, 36.0]
 START_DATE = dt.date(2026, 4, 13)
-END_DATE = dt.date(2026, 6, 19)
 MAX_PASSES = 12
 WORKERS = 6
 DEFAULT_OUTPUT_STEM = "madrid_pmxt"
@@ -40,6 +39,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--output-stem", default=DEFAULT_OUTPUT_STEM)
     parser.add_argument("--workers", type=int, default=WORKERS)
+    parser.add_argument("--start-date", default=START_DATE.isoformat())
+    parser.add_argument(
+        "--end-date",
+        default="",
+        help="Inclusive end date. Defaults to the latest closed Madrid event with a winner in the catalog.",
+    )
+    parser.add_argument(
+        "--merge-existing",
+        action="store_true",
+        help="Merge rebuilt event/hour slices into an existing output stem before recomputing the summary.",
+    )
     return parser.parse_args()
 
 
@@ -47,13 +57,19 @@ def _hour_key(ts: dt.datetime) -> str:
     return ts.astimezone(dt.timezone.utc).replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H")
 
 
-def _relevant_rows():
+def _relevant_rows(start_date: dt.date, end_date: dt.date | None):
     rows = load_catalog(OUTPUT_DIR / "weather_market_catalog.json")
+    madrid_settled_dates = [
+        dt.date.fromisoformat(row.target_date)
+        for row in rows
+        if row.city_slug == "madrid" and row.closed and row.event_winner_label is not None
+    ]
+    resolved_end_date = end_date or max(madrid_settled_dates)
     return _filter_catalog_rows(
         rows,
         city_slugs={"madrid"},
-        start_date=START_DATE,
-        end_date=END_DATE,
+        start_date=start_date,
+        end_date=resolved_end_date,
     )
 
 
@@ -140,23 +156,14 @@ def build_fast_snapshots(rows, entry_hours: list[float]) -> list[EntrySnapshotRo
             return cache[key]
 
         path = OUTPUT_DIR / "weather_hourly" / f"{hour_key}.weather.parquet"
-        if not path.exists() and hour_key in hour_map:
-            _extract_hour(hour_key=hour_key, hour_rows=hour_map[hour_key], output_dir=OUTPUT_DIR, keep_raw=False)
+        if not path.exists():
+            cache[key] = pd.DataFrame(columns=columns)
+            return cache[key]
 
         try:
             df = pd.read_parquet(path, columns=columns, filters=[("event_slug", "==", event_slug)], engine="pyarrow")
         except Exception:
-            if hour_key in hour_map:
-                _extract_hour(hour_key=hour_key, hour_rows=hour_map[hour_key], output_dir=OUTPUT_DIR, keep_raw=False)
-            try:
-                df = pd.read_parquet(
-                    path,
-                    columns=columns,
-                    filters=[("event_slug", "==", event_slug)],
-                    engine="pyarrow",
-                )
-            except Exception:
-                df = pd.DataFrame(columns=columns)
+            df = pd.DataFrame(columns=columns)
 
         if len(df):
             df["timestamp_received"] = pd.to_datetime(df["timestamp_received"], utc=True)
@@ -226,19 +233,42 @@ def build_fast_snapshots(rows, entry_hours: list[float]) -> list[EntrySnapshotRo
 def main() -> None:
     args = _parse_args()
     entry_hours = _parse_entry_hours(args.entry_hours)
-    rows = _relevant_rows()
-    print(f"madrid_events={len({row.event_slug for row in rows})}", flush=True)
+    start_date = dt.date.fromisoformat(args.start_date)
+    end_date = dt.date.fromisoformat(args.end_date) if args.end_date else None
+    rows = _relevant_rows(start_date, end_date)
+    target_dates = sorted({row.target_date for row in rows})
+    print(
+        f"madrid_events={len({row.event_slug for row in rows})} "
+        f"range={target_dates[0]}..{target_dates[-1]}",
+        flush=True,
+    )
     fill_missing_hours(rows, entry_hours=entry_hours, workers=max(1, int(args.workers)))
     snapshots = build_fast_snapshots(rows, entry_hours=entry_hours)
 
     snapshot_path = OUTPUT_DIR / f"{args.output_stem}_entry_snapshots.parquet"
-    pd.DataFrame([asdict(row) for row in snapshots]).to_parquet(snapshot_path, index=False, engine="pyarrow")
+    snapshots_df = pd.DataFrame([asdict(row) for row in snapshots])
+    if args.merge_existing and snapshot_path.exists():
+        existing_df = pd.read_parquet(snapshot_path)
+        if len(snapshots_df):
+            rebuilt_slices = set(zip(snapshots_df["event_slug"], snapshots_df["entry_hours"]))
+            keep_mask = [
+                (event_slug, float(entry_hours)) not in rebuilt_slices
+                for event_slug, entry_hours in zip(existing_df["event_slug"], existing_df["entry_hours"])
+            ]
+            snapshots_df = pd.concat([existing_df[keep_mask], snapshots_df], ignore_index=True)
+        else:
+            snapshots_df = existing_df
+        snapshots_df = snapshots_df.sort_values(["target_date", "entry_hours", "bucket_label"])
+    if not len(snapshots_df):
+        raise RuntimeError("No PMXT snapshots were available; existing output was left untouched.")
+    snapshots_df.to_parquet(snapshot_path, index=False, engine="pyarrow")
 
-    summary = run_pmxt_weather_backtest(snapshots, threshold=float(args.threshold))
+    merged_snapshots = [EntrySnapshotRow(**row) for row in snapshots_df.to_dict("records")]
+    summary = run_pmxt_weather_backtest(merged_snapshots, threshold=float(args.threshold))
     summary_path = OUTPUT_DIR / f"{args.output_stem}_weather_backtest_summary.json"
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2))
 
-    print(f"snapshot_rows={len(snapshots)}", flush=True)
+    print(f"snapshot_rows={len(snapshots_df)}", flush=True)
     print(f"snapshot_path={snapshot_path}", flush=True)
     print(f"summary_path={summary_path}", flush=True)
     for row in summary["summary_by_entry_hour"]:

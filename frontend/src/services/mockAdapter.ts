@@ -75,7 +75,6 @@ export const mockAdapter: BacktestService = {
         price: settlePrice,
         qty: Math.abs(position),
       });
-      position = 0;
     }
     series[lastIdx] = {
       ...series[lastIdx],

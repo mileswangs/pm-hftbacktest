@@ -292,3 +292,103 @@ select {
     transform: translateX(100%);
   }
 }
+
+.tab-bar {
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
+  scrollbar-width: none;
+}
+
+.tab-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.tab-bar-item {
+  min-width: 138px;
+  flex: 1 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) - 4px);
+  background: transparent;
+  color: var(--ink-soft);
+  text-align: left;
+}
+
+.tab-bar-item:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.tab-bar-item.active {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 4px 16px rgba(46, 34, 24, 0.08);
+}
+
+.tab-bar-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.tab-bar-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tab-bar-copy strong {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.tab-bar-copy small {
+  color: var(--ink-faint);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.tab-bar-badge {
+  min-width: 23px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: var(--inset);
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-align: center;
+}
+
+.tab-bar-compact {
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+}
+
+.tab-bar-compact .tab-bar-item {
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.tab-bar-compact .tab-bar-copy small {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .tab-bar-item {
+    min-width: 128px;
+  }
+
+  .tab-bar-copy small {
+    display: none;
+  }
+}

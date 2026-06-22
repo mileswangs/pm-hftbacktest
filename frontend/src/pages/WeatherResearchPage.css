@@ -2,6 +2,23 @@
   min-width: 0;
 }
 
+.weather-tab-panel[hidden] {
+  display: none !important;
+}
+
+.weather-tab-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.col-results > div > .tab-bar {
+  position: sticky;
+  top: 78px;
+  z-index: 8;
+  backdrop-filter: blur(14px);
+}
+
 .weather-list {
   gap: 14px;
 }
@@ -176,6 +193,107 @@
   grid-template-columns: repeat(2, minmax(110px, 1fr));
   gap: 10px;
   min-width: 260px;
+}
+
+.weather-ticket {
+  padding: 18px;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, rgba(250, 246, 239, 0.98) 0%, rgba(255, 253, 248, 0.98) 100%);
+}
+
+.weather-ticket-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.weather-ticket-header h3 {
+  margin: 4px 0 0;
+  font-size: 24px;
+}
+
+.weather-ticket-badge {
+  min-width: 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--inset);
+}
+
+.weather-ticket-badge strong {
+  font-size: 26px;
+  line-height: 1;
+}
+
+.weather-ticket-badge.trade {
+  border-color: rgba(79, 122, 46, 0.28);
+  background: rgba(79, 122, 46, 0.1);
+}
+
+.weather-ticket-badge.watch {
+  border-color: rgba(154, 107, 31, 0.28);
+  background: rgba(154, 107, 31, 0.1);
+}
+
+.weather-ticket-badge.skip {
+  border-color: rgba(178, 58, 46, 0.28);
+  background: rgba(178, 58, 46, 0.08);
+}
+
+.weather-ticket-grid {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.weather-ticket-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--inset);
+}
+
+.weather-ticket-card strong {
+  font-size: 20px;
+}
+
+.weather-ticket-card span:last-child {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.weather-ticket-flags {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.weather-ticket-flag {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.weather-ticket-flag.danger {
+  background: rgba(178, 58, 46, 0.1);
+  color: var(--neg);
+}
+
+.weather-ticket-flag.watch {
+  background: rgba(154, 107, 31, 0.12);
+  color: #8b5d16;
 }
 
 .weather-nearlock {
@@ -418,7 +536,7 @@
 
 .weather-research-grid {
   display: grid;
-  grid-template-columns: 1fr 1.15fr;
+  grid-template-columns: 1fr;
   gap: 14px;
 }
 
@@ -539,12 +657,14 @@
     flex-direction: column;
   }
 
+  .weather-ticket-header,
   .weather-nearlock-header {
     flex-direction: column;
   }
 
   .weather-nearlock-grid,
   .weather-nearlock-scoreboard,
+  .weather-ticket-grid,
   .weather-hero-metrics,
   .weather-detail-grid,
   .weather-research-grid,
