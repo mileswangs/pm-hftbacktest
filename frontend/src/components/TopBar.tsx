@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import type { AdapterKind } from '../services/types';
 
-export type AppMode = 'weather' | 'dashboard';
+export type AppMode = 'weather' | 'dashboard' | 'metar';
 
 export function TopBar({
   mode,
@@ -54,6 +54,7 @@ export function TopBar({
           <div style={{ display: 'flex', gap: 8 }}>
             {[
               { id: 'weather', label: 'Weather Study' },
+              { id: 'metar', label: 'METAR Study' },
               { id: 'dashboard', label: 'General Backtester' },
             ].map((item) => {
               const active = mode === item.id;
@@ -90,6 +91,15 @@ export function TopBar({
               <option value="http">HTTP · /api/backtest</option>
             </select>
           </label>
+        ) : mode === 'metar' ? (
+          <div style={{ maxWidth: 360, textAlign: 'right' }}>
+            <div className="eyebrow" style={{ marginBottom: 4 }}>
+              METAR NO-Convergence
+            </div>
+            <div style={{ color: 'var(--ink-soft)', fontSize: 12.5 }}>
+              Precomputed backtest: live station obs vs Polymarket settlement, display only.
+            </div>
+          </div>
         ) : (
           <div style={{ maxWidth: 360, textAlign: 'right' }}>
             <div className="eyebrow" style={{ marginBottom: 4 }}>
