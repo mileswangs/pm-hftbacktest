@@ -1,4 +1,11 @@
-import type { EntryHourSummary, WeatherDataset, WeatherEvent, WeatherOutcome, WeatherRun } from './types';
+import type {
+  EntryHourSummary,
+  WeatherDataset,
+  WeatherEvent,
+  WeatherOrderbookCapacityDataset,
+  WeatherOutcome,
+  WeatherRun,
+} from './types';
 import { fmtPct } from '../lib/format';
 import { CHART, COMPARE_COLORS } from '../theme/colors';
 
@@ -117,6 +124,21 @@ export type DailyBuyPointRow = {
   winnerLabel: string | null;
 };
 
+export type DailyTradeRow = {
+  eventSlug: string;
+  date: string;
+  pnl: number;
+  cumulativePnl: number;
+  entryTimeUtc: string;
+  entryTimestamp: number;
+  endTimestamp: number;
+  selectedLabels: string[];
+  selectedProbabilitySum: number;
+  didHit: boolean;
+  winnerLabel: string | null;
+  depthHint: string | null;
+};
+
 export const ORDERBOOK_CAPACITY_URLS: Record<string, Partial<Record<number, string>>> = {
   madrid: {
     36: '/data/weather/madrid-pmxt-orderbook-36h.json',
@@ -230,6 +252,35 @@ export function bucketKey(label: string): number | null {
     return (matches[0] + matches[1]) / 2;
   }
   return matches[0];
+}
+
+/**
+ * Picks the "mainstream" outcome labels to show on a multi-line detail chart:
+ * the buckets we actually bought, the bucket that ended up winning, and
+ * anything within `radius` bucket-steps of either — instead of all ~11 outcomes.
+ */
+export function nearbyBucketLabels(event: WeatherEvent, run: WeatherRun | null, radius = 2): Set<string> {
+  const centers = new Set<string>(run?.selectedLabels ?? []);
+  if (event.winnerLabel) centers.add(event.winnerLabel);
+  if (centers.size === 0) {
+    return new Set(event.outcomes.map((o) => o.label));
+  }
+
+  const keyed = event.outcomes
+    .map((o) => ({ label: o.label, key: bucketKey(o.label) }))
+    .filter((o): o is { label: string; key: number } => o.key != null);
+  const centerKeys = [...centers]
+    .map((label) => keyed.find((k) => k.label === label)?.key)
+    .filter((key): key is number => key != null);
+
+  const result = new Set<string>(centers);
+  if (centerKeys.length === 0) return result;
+  for (const { label, key } of keyed) {
+    if (centerKeys.some((centerKey) => Math.abs(key - centerKey) <= radius)) {
+      result.add(label);
+    }
+  }
+  return result;
 }
 
 export function lastPointAtOrBefore(outcome: WeatherOutcome, ts: number) {
@@ -707,6 +758,56 @@ export function buildDailyBuyPointRows(dataset: WeatherDataset | null, entryHour
       };
     })
     .filter((row): row is DailyBuyPointRow => row != null);
+}
+
+export function buildDailyTradeRows(
+  dataset: WeatherDataset | null,
+  entryHours: number | null,
+  orderbookCapacity?: WeatherOrderbookCapacityDataset | null,
+): DailyTradeRow[] {
+  if (!dataset || entryHours == null) return [];
+
+  const depthByDateAndBucket = new Map<string, string>();
+  if (orderbookCapacity) {
+    for (const row of orderbookCapacity.rows) {
+      const bits = [`ask ${fmtPct(row.snapshotBestAsk ?? 0, 1)}`];
+      if (row.cumSizePlus1c != null) bits.push(`+1c ${fmtCompact(row.cumSizePlus1c, 1)}sh`);
+      depthByDateAndBucket.set(`${row.targetDate}__${row.bucketLabel}`, bits.join(' · '));
+    }
+  }
+
+  let cumulative = 0;
+  return dataset.events
+    .map((event) => {
+      const run = findRun(event, entryHours);
+      if (!run) return null;
+      cumulative += run.pnl;
+
+      let depthHint: string | null = null;
+      for (const label of run.selectedLabels) {
+        const hint = depthByDateAndBucket.get(`${event.date}__${label}`);
+        if (hint) {
+          depthHint = hint;
+          break;
+        }
+      }
+
+      return {
+        eventSlug: event.eventSlug,
+        date: event.date,
+        pnl: run.pnl,
+        cumulativePnl: cumulative,
+        entryTimeUtc: run.entryTimeUtc,
+        entryTimestamp: run.entryTimestamp,
+        endTimestamp: new Date(event.endTimeUtc).getTime(),
+        selectedLabels: run.selectedLabels,
+        selectedProbabilitySum: run.selectedProbabilitySum,
+        didHit: run.didHit,
+        winnerLabel: event.winnerLabel,
+        depthHint,
+      };
+    })
+    .filter((row): row is DailyTradeRow => row != null);
 }
 
 export function computeMaxDrawdown(rows: ExecutionEventRow[], key: 'cumulativeRawPnl' | 'cumulativeConservativePnl'): number {

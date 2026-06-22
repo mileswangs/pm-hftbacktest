@@ -5,10 +5,12 @@ import { TopBar } from '../components/TopBar';
 import type { AppMode } from '../components/TopBar';
 import { TabBar } from '../components/TabBar';
 import type { TabItem } from '../components/TabBar';
+import { Drawer } from '../components/Drawer';
 import { fmtDateShort, fmtDateTime, fmtPct } from '../lib/format';
 import { CHART, COMPARE_COLORS } from '../theme/colors';
 import { buildWeatherDataset, inferCityLabel, parseEntryHours } from '../weather/buildDataset';
 import { CITY_PRESETS, CUSTOM_CITY_VALUE, findPresetCity } from '../weather/cityCatalog';
+import { DailyTradeBoard } from '../weather/DailyTradeBoard';
 import type {
   WeatherDataset,
   WeatherLibraryManifest,
@@ -23,7 +25,6 @@ const LIBRARY_MANIFEST_URL = '/data/weather/manifest.json';
 
 type LoadState = 'loading' | 'ready' | 'error';
 type WorkspaceTab = 'overview' | 'signal' | 'liquidity' | 'risk' | 'audit';
-type SidebarTab = 'setup' | 'explore';
 
 const WORKSPACE_TABS = [
   { id: 'overview', label: 'Overview', description: 'Decision and headline PnL' },
@@ -32,11 +33,6 @@ const WORKSPACE_TABS = [
   { id: 'risk', label: 'Risk', description: 'Guardrails and drawdown' },
   { id: 'audit', label: 'Event Audit', description: 'Every historical decision' },
 ] as const satisfies readonly TabItem<WorkspaceTab>[];
-
-const SIDEBAR_TABS = [
-  { id: 'setup', label: 'Setup' },
-  { id: 'explore', label: 'Explore' },
-] as const satisfies readonly TabItem<SidebarTab>[];
 
 import {
   ORDERBOOK_CAPACITY_URLS,
@@ -113,7 +109,7 @@ export function WeatherResearchPage({
     const stored = localStorage.getItem('weather-workspace-tab');
     return WORKSPACE_TABS.some((tab) => tab.id === stored) ? (stored as WorkspaceTab) : 'overview';
   });
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('setup');
+  const [strategyPanelOpen, setStrategyPanelOpen] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('weather-workspace-tab', activeWorkspace);
@@ -356,24 +352,6 @@ export function WeatherResearchPage({
     }),
     [executionPolicy, maxProbabilityInput, minSignalMarginInput, maxPreEntryMoveInput],
   );
-
-  const backtestOverviewSeries = useMemo<ChartSeries[]>(() => {
-    if (eventRows.length === 0) return [];
-    return [
-      {
-        label: 'event pnl',
-        color: '#9a6b1f',
-        dashed: true,
-        opacity: 0.75,
-        points: eventRows.map((row, index) => ({ x: index, y: row.pnl })),
-      },
-      {
-        label: 'cumulative pnl',
-        color: CHART.position,
-        points: eventRows.map((row, index) => ({ x: index, y: row.cumulativePnl })),
-      },
-    ];
-  }, [eventRows]);
 
   const executionRows = useMemo(
     () => buildExecutionRows(dataset, selectedEntryHours, executionPolicy),
@@ -636,217 +614,171 @@ export function WeatherResearchPage({
 
   return (
     <div className="shell">
-      <TopBar mode={mode} onModeChange={onModeChange} adapter="mock" onAdapterChange={() => undefined} />
-      <main className="grid">
-        <section className="col-history weather-panel weather-list">
-          <div className="eyebrow">Dates</div>
-          {status === 'loading' ? <p className="muted">Loading weather research workspace…</p> : null}
-          {status === 'error' ? <p className="neg mono">{error}</p> : null}
-          {status === 'ready' && dataset ? (
-            <>
-              <div className="weather-overview-card card">
-                <div className="eyebrow">Dataset</div>
-                <h2>{dataset.cityLabel} Highest Temperature</h2>
-                <p className="muted" style={{ margin: '6px 0 0' }}>
-                  {dataset.events.length} resolved days, {dataset.entryHours.length} entry points, source: <strong>{dataSourceLabel}</strong>.
-                </p>
-                <div className="weather-stat-strip">
-                  <div>
-                    <span className="eyebrow">Anchor</span>
-                    <strong>{dataset.anchorDate}</strong>
-                  </div>
-                  <div>
-                    <span className="eyebrow">Trades</span>
-                    <strong>{totals.totalTrades}</strong>
-                  </div>
-                  <div>
-                    <span className="eyebrow">Cumulative PnL</span>
-                    <strong className={totals.totalPnl >= 0 ? 'pos' : 'neg'}>{totals.totalPnl.toFixed(3)}</strong>
-                  </div>
-                </div>
-                {dataset.dataSourceDetail ? (
-                  <p className="muted" style={{ margin: '8px 0 0', fontSize: 12.5 }}>
-                    {dataset.dataSourceDetail}
-                  </p>
-                ) : null}
-              </div>
+      <TopBar
+        mode={mode}
+        onModeChange={onModeChange}
+        adapter="mock"
+        onAdapterChange={() => undefined}
+        extraActions={
+          mode === 'weather' ? (
+            <button type="button" className="btn btn-ghost" onClick={() => setStrategyPanelOpen(true)}>
+              ⚙ Strategy Params
+            </button>
+          ) : undefined
+        }
+      />
 
-              <ul className="weather-event-list">
-                {[...dataset.events].reverse().map((event) => {
-                  const run = findRun(event, selectedEntryHours);
-                  const active = event.eventSlug === selectedEvent?.eventSlug;
-                  return (
-                    <li key={event.eventSlug}>
-                      <button
-                        type="button"
-                        className={`weather-event-item ${active ? 'active' : ''}`}
-                        onClick={() => setSelectedEventSlug(event.eventSlug)}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                          <strong>{fmtDateShort(event.date)}</strong>
-                          {run ? <span className={`mono ${run.pnl >= 0 ? 'pos' : 'neg'}`}>{run.pnl.toFixed(3)}</span> : null}
-                        </div>
-                        <div className="muted" style={{ fontSize: 12 }}>
-                          winner: {event.winnerLabel ?? 'n/a'}
-                        </div>
-                        {run ? (
-                          <div className="weather-chip-row">
-                            <span className="weather-chip">{run.entryHours}h</span>
-                            <span className="weather-chip">{run.selectionMode.replaceAll('_', ' ')}</span>
-                          </div>
-                        ) : null}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </>
+      <Drawer open={strategyPanelOpen} onClose={() => setStrategyPanelOpen(false)} title="Strategy Params">
+        <div className="card weather-tab-panel" style={{ padding: 16 }}>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>
+            Research Controls
+          </div>
+          <div className="weather-form-grid">
+            <label>
+              <span className="field-label">City</span>
+              <select className="input" value={cityPresetValue} onChange={(e) => handleCityPresetChange(e.target.value)}>
+                {CITY_PRESETS.map((city) => (
+                  <option key={city.slug} value={city.slug}>
+                    {city.label}
+                  </option>
+                ))}
+                <option value={CUSTOM_CITY_VALUE}>Custom slug…</option>
+              </select>
+            </label>
+            <label>
+              <span className="field-label">City slug</span>
+              <input className="input mono" value={citySlugInput} onChange={(e) => handleCitySlugChange(e.target.value)} readOnly={!isCustomCity} />
+            </label>
+            <label>
+              <span className="field-label">City label</span>
+              <input className="input" value={cityLabelInput} onChange={(e) => setCityLabelInput(e.target.value)} readOnly={!isCustomCity} />
+            </label>
+            <label>
+              <span className="field-label">Anchor date</span>
+              <input className="input mono" type="date" value={anchorDateInput} onChange={(e) => setAnchorDateInput(e.target.value)} />
+            </label>
+            <label>
+              <span className="field-label">Days</span>
+              <input className="input mono" type="number" min={1} value={daysInput} onChange={(e) => setDaysInput(e.target.value)} />
+            </label>
+            <label>
+              <span className="field-label">Entry hours</span>
+              <input className="input mono" value={entryHoursInput} onChange={(e) => setEntryHoursInput(e.target.value)} />
+            </label>
+            <label>
+              <span className="field-label">Threshold</span>
+              <input className="input mono" type="number" min={0.01} max={0.99} step={0.01} value={thresholdInput} onChange={(e) => setThresholdInput(e.target.value)} />
+            </label>
+            <label>
+              <span className="field-label">Slip / leg</span>
+              <input className="input mono" type="number" min={0} step={0.001} value={slippageInput} onChange={(e) => setSlippageInput(e.target.value)} />
+            </label>
+            <label>
+              <span className="field-label">Fee / leg</span>
+              <input className="input mono" type="number" min={0} step={0.001} value={feeInput} onChange={(e) => setFeeInput(e.target.value)} />
+            </label>
+            <label>
+              <span className="field-label">Max stale min</span>
+              <input className="input mono" type="number" min={0} step={1} value={maxStaleMinutesInput} onChange={(e) => setMaxStaleMinutesInput(e.target.value)} />
+            </label>
+            <label>
+              <span className="field-label">Min updates 6h</span>
+              <input className="input mono" type="number" min={0} step={1} value={minUpdatesInput} onChange={(e) => setMinUpdatesInput(e.target.value)} />
+            </label>
+            <label>
+              <span className="field-label">Max paid prob</span>
+              <input className="input mono" type="number" min={0.01} max={0.99} step={0.01} value={maxProbabilityInput} onChange={(e) => setMaxProbabilityInput(e.target.value)} />
+            </label>
+            <label>
+              <span className="field-label">Min signal margin</span>
+              <input className="input mono" type="number" min={0.01} max={0.5} step={0.01} value={minSignalMarginInput} onChange={(e) => setMinSignalMarginInput(e.target.value)} />
+            </label>
+            <label>
+              <span className="field-label">Max pre-entry 6h move</span>
+              <input className="input mono" type="number" min={0.01} max={0.99} step={0.01} value={maxPreEntryMoveInput} onChange={(e) => setMaxPreEntryMoveInput(e.target.value)} />
+            </label>
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button className="btn btn-primary" type="button" onClick={submitGenerator} disabled={status === 'loading'}>
+              {status === 'loading' ? 'Refreshing…' : 'Refresh From APIs'}
+            </button>
+            <button
+              className="btn btn-ghost"
+              type="button"
+              disabled={!selectedPresetHasArchive}
+              onClick={() => {
+                void loadBundledDataset(selectedArchiveSlug).catch((err: unknown) => {
+                  setError(err instanceof Error ? err.message : String(err));
+                  setStatus('error');
+                });
+              }}
+            >
+              Load Local Archive
+            </button>
+            <button
+              className="btn btn-ghost"
+              type="button"
+              onClick={() => {
+                setCityPresetValue('chengdu');
+                setCitySlugInput('chengdu');
+                setCityLabelInput('Chengdu');
+                setAnchorDateInput('2026-06-19');
+                setDaysInput('17');
+                setEntryHoursInput('6,12,18,24,36');
+                setThresholdInput('0.5');
+                setSlippageInput('0.015');
+                setFeeInput('0.005');
+                setMaxStaleMinutesInput('90');
+                setMinUpdatesInput('3');
+                setMaxProbabilityInput('0.82');
+                setMinSignalMarginInput('0.03');
+                setMaxPreEntryMoveInput('0.12');
+                void loadBundledDataset('chengdu').catch(() => undefined);
+              }}
+            >
+              Reset Defaults
+            </button>
+          </div>
+          <p className="muted" style={{ margin: '10px 0 0', fontSize: 12.5 }}>
+            City dropdown now loads the local archive directly, so dates and entry-hour summaries switch with the city instead of staying on the last dataset.
+          </p>
+          {progress ? (
+            <p className="mono" style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--ink-soft)' }}>
+              {progress}
+            </p>
           ) : null}
-        </section>
+        </div>
 
-        <section className="col-config weather-panel">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <TabBar
-              ariaLabel="Weather sidebar"
-              items={SIDEBAR_TABS}
-              value={sidebarTab}
-              onChange={setSidebarTab}
-              compact
-            />
-            <div
-              id="weather-sidebar-setup-panel"
-              role="tabpanel"
-              aria-labelledby="weather-sidebar-setup-tab"
-              hidden={sidebarTab !== 'setup'}
-              className="card weather-tab-panel"
-              style={{ padding: 16 }}
-            >
-              <div className="eyebrow" style={{ marginBottom: 8 }}>
-                Research Controls
-              </div>
-              <div className="weather-form-grid">
-                <label>
-                  <span className="field-label">City</span>
-                  <select className="input" value={cityPresetValue} onChange={(e) => handleCityPresetChange(e.target.value)}>
-                    {CITY_PRESETS.map((city) => (
-                      <option key={city.slug} value={city.slug}>
-                        {city.label}
-                      </option>
-                    ))}
-                    <option value={CUSTOM_CITY_VALUE}>Custom slug…</option>
-                  </select>
-                </label>
-                <label>
-                  <span className="field-label">City slug</span>
-                  <input className="input mono" value={citySlugInput} onChange={(e) => handleCitySlugChange(e.target.value)} readOnly={!isCustomCity} />
-                </label>
-                <label>
-                  <span className="field-label">City label</span>
-                  <input className="input" value={cityLabelInput} onChange={(e) => setCityLabelInput(e.target.value)} readOnly={!isCustomCity} />
-                </label>
-                <label>
-                  <span className="field-label">Anchor date</span>
-                  <input className="input mono" type="date" value={anchorDateInput} onChange={(e) => setAnchorDateInput(e.target.value)} />
-                </label>
-                <label>
-                  <span className="field-label">Days</span>
-                  <input className="input mono" type="number" min={1} value={daysInput} onChange={(e) => setDaysInput(e.target.value)} />
-                </label>
-                <label>
-                  <span className="field-label">Entry hours</span>
-                  <input className="input mono" value={entryHoursInput} onChange={(e) => setEntryHoursInput(e.target.value)} />
-                </label>
-                <label>
-                  <span className="field-label">Threshold</span>
-                  <input className="input mono" type="number" min={0.01} max={0.99} step={0.01} value={thresholdInput} onChange={(e) => setThresholdInput(e.target.value)} />
-                </label>
-                <label>
-                  <span className="field-label">Slip / leg</span>
-                  <input className="input mono" type="number" min={0} step={0.001} value={slippageInput} onChange={(e) => setSlippageInput(e.target.value)} />
-                </label>
-                <label>
-                  <span className="field-label">Fee / leg</span>
-                  <input className="input mono" type="number" min={0} step={0.001} value={feeInput} onChange={(e) => setFeeInput(e.target.value)} />
-                </label>
-                <label>
-                  <span className="field-label">Max stale min</span>
-                  <input className="input mono" type="number" min={0} step={1} value={maxStaleMinutesInput} onChange={(e) => setMaxStaleMinutesInput(e.target.value)} />
-                </label>
-                <label>
-                  <span className="field-label">Min updates 6h</span>
-                  <input className="input mono" type="number" min={0} step={1} value={minUpdatesInput} onChange={(e) => setMinUpdatesInput(e.target.value)} />
-                </label>
-                <label>
-                  <span className="field-label">Max paid prob</span>
-                  <input className="input mono" type="number" min={0.01} max={0.99} step={0.01} value={maxProbabilityInput} onChange={(e) => setMaxProbabilityInput(e.target.value)} />
-                </label>
-                <label>
-                  <span className="field-label">Min signal margin</span>
-                  <input className="input mono" type="number" min={0.01} max={0.5} step={0.01} value={minSignalMarginInput} onChange={(e) => setMinSignalMarginInput(e.target.value)} />
-                </label>
-                <label>
-                  <span className="field-label">Max pre-entry 6h move</span>
-                  <input className="input mono" type="number" min={0.01} max={0.99} step={0.01} value={maxPreEntryMoveInput} onChange={(e) => setMaxPreEntryMoveInput(e.target.value)} />
-                </label>
-              </div>
-              <div style={{ display: 'flex', gap: 10, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                <button className="btn btn-primary" type="button" onClick={submitGenerator} disabled={status === 'loading'}>
-                  {status === 'loading' ? 'Refreshing…' : 'Refresh From APIs'}
-                </button>
-                <button
-                  className="btn btn-ghost"
-                  type="button"
-                  disabled={!selectedPresetHasArchive}
-                  onClick={() => {
-                    void loadBundledDataset(selectedArchiveSlug).catch((err: unknown) => {
-                      setError(err instanceof Error ? err.message : String(err));
-                      setStatus('error');
-                    });
-                  }}
-                >
-                  Load Local Archive
-                </button>
-                <button
-                  className="btn btn-ghost"
-                  type="button"
-                  onClick={() => {
-                    setCityPresetValue('chengdu');
-                    setCitySlugInput('chengdu');
-                    setCityLabelInput('Chengdu');
-                    setAnchorDateInput('2026-06-19');
-                    setDaysInput('17');
-                    setEntryHoursInput('6,12,18,24,36');
-                    setThresholdInput('0.5');
-                    setSlippageInput('0.015');
-                    setFeeInput('0.005');
-                    setMaxStaleMinutesInput('90');
-                    setMinUpdatesInput('3');
-                    setMaxProbabilityInput('0.82');
-                    setMinSignalMarginInput('0.03');
-                    setMaxPreEntryMoveInput('0.12');
-                    void loadBundledDataset('chengdu').catch(() => undefined);
-                  }}
-                >
-                  Reset Defaults
-                </button>
-              </div>
-              <p className="muted" style={{ margin: '10px 0 0', fontSize: 12.5 }}>
-                City dropdown now loads the local archive directly, so dates and entry-hour summaries switch with the city instead of staying on the last dataset.
-              </p>
-              {progress ? (
-                <p className="mono" style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--ink-soft)' }}>
-                  {progress}
-                </p>
-              ) : null}
+        {dataset ? (
+          <div className="card" style={{ padding: 16, marginTop: 14 }}>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>
+              Entry Hour
             </div>
+            <div className="weather-entry-hour-seg">
+              {dataset.summaryByEntryHour.map((item) => {
+                const active = item.entryHours === selectedEntryHours;
+                const gated = strategyHourSummaryMap.get(item.entryHours) ?? null;
+                return (
+                  <button
+                    key={item.entryHours}
+                    type="button"
+                    className={`weather-entry-hour-seg-btn ${active ? 'active' : ''}`}
+                    onClick={() => setSelectedEntryHours(item.entryHours)}
+                    title={`raw hit ${fmtPct(item.hitRate, 1)} · risk pnl ${gated?.gatedTotalPnl.toFixed(3) ?? '-'} · buy ${gated?.tradeCount ?? 0}/${gated?.rawTradeCount ?? item.tradedCount}`}
+                  >
+                    <strong>{item.entryHours}h</strong>
+                    {dataset.bestEntryHour === item.entryHours ? <span className="weather-pill">best</span> : null}
+                    <span className={`mono ${item.totalPnl >= 0 ? 'pos' : 'neg'}`}>{item.totalPnl.toFixed(2)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
 
-            <div
-              id="weather-sidebar-explore-panel"
-              role="tabpanel"
-              aria-labelledby="weather-sidebar-explore-tab"
-              hidden={sidebarTab !== 'explore'}
-              className="weather-tab-panel weather-tab-stack"
-            >
+        <details className="weather-advanced-details" style={{ marginTop: 14 }}>
+          <summary className="eyebrow">Advanced · city library &amp; date × hour matrix</summary>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
             {cityBoard.length > 0 ? (
               <div className="card" style={{ padding: 16 }}>
                 <div className="eyebrow" style={{ marginBottom: 8 }}>
@@ -886,92 +818,88 @@ export function WeatherResearchPage({
             ) : null}
 
             {dataset ? (
-              <>
-                <div className="card" style={{ padding: 16 }}>
-                  <div className="eyebrow" style={{ marginBottom: 8 }}>
-                    Entry Hour Grid
-                  </div>
-                  <div className="weather-hour-grid">
-                    {dataset.summaryByEntryHour.map((item) => {
-                      const active = item.entryHours === selectedEntryHours;
-                      const gated = strategyHourSummaryMap.get(item.entryHours) ?? null;
-                      return (
-                        <button
-                          key={item.entryHours}
-                          type="button"
-                          className={`weather-hour-card ${active ? 'active' : ''}`}
-                          onClick={() => setSelectedEntryHours(item.entryHours)}
-                        >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                            <strong>{item.entryHours}h</strong>
-                            {dataset.bestEntryHour === item.entryHours ? <span className="weather-pill">best</span> : null}
-                          </div>
-                          <div className="mono" style={{ fontSize: 20, color: item.totalPnl >= 0 ? 'var(--pos)' : 'var(--neg)' }}>
-                            {item.totalPnl.toFixed(3)}
-                          </div>
-                          <div className="muted" style={{ fontSize: 12 }}>
-                            raw hit {fmtPct(item.hitRate, 1)} · avg {item.avgPnl.toFixed(3)}
-                          </div>
-                          <div className="muted" style={{ fontSize: 12 }}>
-                            risk pnl {gated?.gatedTotalPnl.toFixed(3) ?? '-'} · buy {gated?.tradeCount ?? 0}/{gated?.rawTradeCount ?? item.tradedCount}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
+              <div className="card" style={{ padding: 16 }}>
+                <div className="eyebrow" style={{ marginBottom: 8 }}>
+                  Date × Entry Hour
                 </div>
-
-                <div className="card" style={{ padding: 16 }}>
-                  <div className="eyebrow" style={{ marginBottom: 8 }}>
-                    Date × Entry Hour
-                  </div>
-                  <div className="weather-matrix-wrap">
-                    <table className="weather-matrix">
-                      <thead>
-                        <tr>
-                          <th>Date</th>
-                          {dataset.entryHours.map((hours) => (
-                            <th key={hours}>{hours}h</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[...dataset.events].reverse().map((event) => (
-                          <tr key={event.eventSlug}>
-                            <th>{fmtDateShort(event.date)}</th>
-                            {dataset.entryHours.map((hours) => {
-                              const run = findRun(event, hours);
-                              const active = event.eventSlug === selectedEvent?.eventSlug && hours === selectedEntryHours;
-                              return (
-                                <td key={`${event.eventSlug}-${hours}`}>
-                                  <button
-                                    type="button"
-                                    className={`weather-matrix-cell ${active ? 'active' : ''}`}
-                                    style={{ background: run ? toneForPnl(run.pnl) : 'rgba(122, 105, 81, 0.08)' }}
-                                    onClick={() => {
-                                      setSelectedEventSlug(event.eventSlug);
-                                      setSelectedEntryHours(hours);
-                                    }}
-                                    title={run ? `${event.date} · ${hours}h · ${run.reason}` : `${event.date} · ${hours}h`}
-                                  >
-                                    {run ? run.pnl.toFixed(2) : '-'}
-                                  </button>
-                                </td>
-                              );
-                            })}
-                          </tr>
+                <div className="weather-matrix-wrap">
+                  <table className="weather-matrix">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        {dataset.entryHours.map((hours) => (
+                          <th key={hours}>{hours}h</th>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...dataset.events].reverse().map((event) => (
+                        <tr key={event.eventSlug}>
+                          <th>{fmtDateShort(event.date)}</th>
+                          {dataset.entryHours.map((hours) => {
+                            const run = findRun(event, hours);
+                            const active = event.eventSlug === selectedEvent?.eventSlug && hours === selectedEntryHours;
+                            return (
+                              <td key={`${event.eventSlug}-${hours}`}>
+                                <button
+                                  type="button"
+                                  className={`weather-matrix-cell ${active ? 'active' : ''}`}
+                                  style={{ background: run ? toneForPnl(run.pnl) : 'rgba(122, 105, 81, 0.08)' }}
+                                  onClick={() => {
+                                    setSelectedEventSlug(event.eventSlug);
+                                    setSelectedEntryHours(hours);
+                                  }}
+                                  title={run ? `${event.date} · ${hours}h · ${run.reason}` : `${event.date} · ${hours}h`}
+                                >
+                                  {run ? run.pnl.toFixed(2) : '-'}
+                                </button>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              </>
+              </div>
             ) : null}
-            </div>
           </div>
-        </section>
+        </details>
+      </Drawer>
 
+      <main className="grid weather-grid-single">
         <section className="col-results">
+          {status === 'loading' && !dataset ? <p className="muted">Loading weather research workspace…</p> : null}
+          {status === 'error' && !dataset ? <p className="neg mono">{error}</p> : null}
+          {dataset ? (
+            <div className="weather-overview-card card">
+              <div className="eyebrow">Dataset</div>
+              <h2>{dataset.cityLabel} Highest Temperature</h2>
+              <p className="muted" style={{ margin: '6px 0 0' }}>
+                {dataset.events.length} resolved days, {dataset.entryHours.length} entry points, source: <strong>{dataSourceLabel}</strong>.
+              </p>
+              <div className="weather-stat-strip">
+                <div>
+                  <span className="eyebrow">Anchor</span>
+                  <strong>{dataset.anchorDate}</strong>
+                </div>
+                <div>
+                  <span className="eyebrow">Trades</span>
+                  <strong>{totals.totalTrades}</strong>
+                </div>
+                <div>
+                  <span className="eyebrow">Cumulative PnL</span>
+                  <strong className={totals.totalPnl >= 0 ? 'pos' : 'neg'}>{totals.totalPnl.toFixed(3)}</strong>
+                </div>
+              </div>
+              {dataset.dataSourceDetail ? (
+                <p className="muted" style={{ margin: '8px 0 0', fontSize: 12.5 }}>
+                  {dataset.dataSourceDetail}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
           {dataset && selectedEvent && selectedRun && entrySummary ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div className="weather-hero card rise">
@@ -1004,6 +932,14 @@ export function WeatherResearchPage({
                   </div>
                 </div>
               </div>
+
+              <DailyTradeBoard
+                dataset={dataset}
+                entryHours={selectedEntryHours}
+                orderbookCapacity={orderbookCapacity}
+                selectedEventSlug={selectedEventSlug}
+                onSelectEvent={setSelectedEventSlug}
+              />
 
               <TabBar
                 ariaLabel="Weather workspace"
@@ -1272,63 +1208,6 @@ export function WeatherResearchPage({
                       ))}
                     </div>
                   </section>
-                </div>
-              </section>
-
-              <section className="card weather-tab-panel" hidden={activeWorkspace !== 'overview'} style={{ padding: 16 }}>
-                <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>
-                  <div>
-                    <div className="eyebrow">Backtest Overview</div>
-                    <h3 style={{ fontSize: 16 }}>Whole-window results for {selectedEntryHours}h entry</h3>
-                  </div>
-                  <div className="muted" style={{ fontSize: 12, maxWidth: 420, textAlign: 'right' }}>
-                    `3.67` means cumulative profit of <strong>$3.67</strong> across the tested events, assuming each selected bucket is bought with 1 share notionally and held to settlement. It is not `3.67x`.
-                  </div>
-                </header>
-                <div className="weather-backtest-summary">
-                  <div className="weather-capacity-item">
-                    <span className="eyebrow">Cumulative PnL</span>
-                    <strong className={entrySummary.totalPnl >= 0 ? 'pos' : 'neg'}>{entrySummary.totalPnl.toFixed(3)}</strong>
-                    <span className="muted">USD-equivalent per 1-share sizing</span>
-                  </div>
-                  <div className="weather-capacity-item">
-                    <span className="eyebrow">Avg Event PnL</span>
-                    <strong className={entrySummary.avgPnl >= 0 ? 'pos' : 'neg'}>{entrySummary.avgPnl.toFixed(3)}</strong>
-                    <span className="muted">mean across traded events</span>
-                  </div>
-                  <div className="weather-capacity-item">
-                    <span className="eyebrow">Hit Rate</span>
-                    <strong>{fmtPct(entrySummary.hitRate, 1)}</strong>
-                    <span className="muted">{entrySummary.tradedCount} traded events</span>
-                  </div>
-                  <div className="weather-capacity-item">
-                    <span className="eyebrow">Avg Cost</span>
-                    <strong>{fmtPct(entrySummary.avgProbabilitySum, 1)}</strong>
-                    <span className="muted">average implied probability paid</span>
-                  </div>
-                </div>
-                <div style={{ marginTop: 14 }}>
-                  <LineChart
-                    series={backtestOverviewSeries}
-                    markers={
-                      selectedEvent
-                        ? [
-                            {
-                              x: eventRows.findIndex((row) => row.eventSlug === selectedEvent.eventSlug),
-                              y: eventRows.find((row) => row.eventSlug === selectedEvent.eventSlug)?.cumulativePnl ?? 0,
-                              color: CHART.text,
-                              label: 'selected',
-                            },
-                          ].filter((marker) => marker.x >= 0)
-                        : []
-                    }
-                    height={280}
-                    xFormat={(value) => {
-                      const row = eventRows[Math.round(value)];
-                      return row ? fmtDateShort(row.date) : '';
-                    }}
-                    yFormat={(value) => value.toFixed(2)}
-                  />
                 </div>
               </section>
 

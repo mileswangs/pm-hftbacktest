@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { AdapterKind } from '../services/types';
 
 export type AppMode = 'weather' | 'dashboard';
@@ -7,11 +8,13 @@ export function TopBar({
   onModeChange,
   adapter,
   onAdapterChange,
+  extraActions,
 }: {
   mode: AppMode;
   onModeChange: (mode: AppMode) => void;
   adapter: AdapterKind;
   onAdapterChange: (a: AdapterKind) => void;
+  extraActions?: ReactNode;
 }) {
   return (
     <header
@@ -70,32 +73,35 @@ export function TopBar({
         </div>
       </div>
 
-      {mode === 'dashboard' ? (
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span className="eyebrow" style={{ whiteSpace: 'nowrap' }}>
-            Adapter
-          </span>
-          <select
-            aria-label="Adapter"
-            className="select"
-            style={{ width: 'auto', paddingRight: 28 }}
-            value={adapter}
-            onChange={(e) => onAdapterChange(e.target.value as AdapterKind)}
-          >
-            <option value="mock">Mock · offline</option>
-            <option value="http">HTTP · /api/backtest</option>
-          </select>
-        </label>
-      ) : (
-        <div style={{ maxWidth: 420, textAlign: 'right' }}>
-          <div className="eyebrow" style={{ marginBottom: 4 }}>
-            Chengdu Weather Grid
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        {mode === 'dashboard' ? (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="eyebrow" style={{ whiteSpace: 'nowrap' }}>
+              Adapter
+            </span>
+            <select
+              aria-label="Adapter"
+              className="select"
+              style={{ width: 'auto', paddingRight: 28 }}
+              value={adapter}
+              onChange={(e) => onAdapterChange(e.target.value as AdapterKind)}
+            >
+              <option value="mock">Mock · offline</option>
+              <option value="http">HTTP · /api/backtest</option>
+            </select>
+          </label>
+        ) : (
+          <div style={{ maxWidth: 360, textAlign: 'right' }}>
+            <div className="eyebrow" style={{ marginBottom: 4 }}>
+              Chengdu Weather Grid
+            </div>
+            <div style={{ color: 'var(--ink-soft)', fontSize: 12.5 }}>
+              Multi-date scan with entry-hour comparison, buy markers, and rule explanations.
+            </div>
           </div>
-          <div style={{ color: 'var(--ink-soft)', fontSize: 12.5 }}>
-            Multi-date scan with entry-hour comparison, buy markers, and rule explanations.
-          </div>
-        </div>
-      )}
+        )}
+        {extraActions}
+      </div>
     </header>
   );
 }

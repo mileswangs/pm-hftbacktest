@@ -3,11 +3,16 @@ import type { CSSProperties } from 'react';
 import { CHART } from '../theme/colors';
 
 export interface ChartSeries {
+  /** Unique key for this series. Defaults to `label`. Set explicitly when two
+   * series (e.g. a dimmed pre-entry segment and a bold highlighted segment)
+   * share one legend label but need distinct React/render keys. */
+  id?: string;
   label: string;
   color: string;
   axis?: 'left' | 'right'; // default 'left'
   dashed?: boolean;
   opacity?: number;
+  strokeWidth?: number;
   points: { x: number; y: number }[];
 }
 
@@ -25,10 +30,19 @@ export interface ChartRule {
   dashed?: boolean;
 }
 
+export interface ChartBand {
+  x1: number;
+  x2: number;
+  color: string;
+  opacity?: number;
+  label?: string;
+}
+
 export interface LineChartProps {
   series: ChartSeries[];
   markers?: ChartMarker[];
   rules?: ChartRule[];
+  bands?: ChartBand[];
   height?: number;
   xFormat?: (x: number) => string;
   yFormat?: (y: number) => string;
@@ -36,6 +50,27 @@ export interface LineChartProps {
 }
 
 const identity = (v: number) => String(v);
+
+// Series can come from independently-sampled sources (e.g. each outcome's own
+// price-update cadence), so they don't share one common x-array. Snapping by
+// array index would show each series' point at a different x than the
+// hovered crosshair. Find the point actually nearest the hovered x instead.
+function nearestPoint(points: { x: number; y: number }[], targetX: number) {
+  if (points.length === 0) return undefined;
+  let lo = 0;
+  let hi = points.length - 1;
+  if (targetX <= points[lo].x) return points[lo];
+  if (targetX >= points[hi].x) return points[hi];
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid].x < targetX) lo = mid + 1;
+    else hi = mid;
+  }
+  const before = points[lo - 1];
+  const after = points[lo];
+  if (!before) return after;
+  return targetX - before.x <= after.x - targetX ? before : after;
+}
 
 function extent(values: number[]): [number, number] {
   let min = Infinity;
@@ -54,6 +89,7 @@ export function LineChart({
   series,
   markers = [],
   rules = [],
+  bands = [],
   height = 280,
   xFormat = identity,
   yFormat = identity,
@@ -144,13 +180,23 @@ export function LineChart({
         }
       : {};
 
+  // When a single visual line is split into multiple ChartSeries entries that
+  // share one `label` (e.g. dim pre-entry + bold highlighted segments), only
+  // show one legend entry for that label — the last entry wins so the bolder
+  // "current" styling is what shows in the swatch.
+  const legendSeries = (() => {
+    const byLabel = new Map<string, ChartSeries>();
+    for (const s of series) byLabel.set(s.label, s);
+    return [...byLabel.values()];
+  })();
+
   return (
     <div ref={containerRef} style={{ position: 'relative', width: '100%' }}>
       {/* Legend */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', marginBottom: 8 }}>
-        {series.map((s) => (
+        {legendSeries.map((s) => (
           <span
-            key={s.label}
+            key={s.id ?? s.label}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--ink-soft)' }}
           >
             <span
@@ -183,6 +229,36 @@ export function LineChart({
             </text>
           </g>
         ))}
+
+        {/* bands */}
+        {bands.map((band, i) => {
+          const bx1 = sx(Math.min(band.x1, band.x2));
+          const bx2 = sx(Math.max(band.x1, band.x2));
+          return (
+            <g key={`band-${i}`}>
+              <rect
+                x={bx1}
+                y={pad.t}
+                width={Math.max(0, bx2 - bx1)}
+                height={innerH}
+                fill={band.color}
+                opacity={band.opacity ?? 0.1}
+              />
+              {band.label ? (
+                <text
+                  x={Math.min(width - pad.r - 2, bx1 + 4)}
+                  y={height - pad.b - 6}
+                  textAnchor="start"
+                  fontSize={10}
+                  fill={band.color}
+                  fontFamily="var(--font-mono)"
+                >
+                  {band.label}
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
 
         {/* right axis labels */}
         {hasRight &&
@@ -255,12 +331,12 @@ export function LineChart({
         {/* series */}
         {series.map((s) => (
           <path
-            key={s.label}
+            key={s.id ?? s.label}
             className="series-line"
             d={pathFor(s)}
             fill="none"
             stroke={s.color}
-            strokeWidth={1.75}
+            strokeWidth={s.strokeWidth ?? 1.75}
             strokeLinejoin="round"
             strokeLinecap="round"
             strokeDasharray={s.dashed ? '5 4' : undefined}
@@ -289,11 +365,12 @@ export function LineChart({
 
         {/* hover dots */}
         {hover != null &&
+          baseX[hover] &&
           series.map((s) => {
-            const p = s.points[hover];
+            const p = nearestPoint(s.points, baseX[hover].x);
             if (!p || !Number.isFinite(p.y)) return null;
             const sy = s.axis === 'right' ? syR : syL;
-            return <circle key={`d${s.label}`} cx={sx(p.x)} cy={sy(p.y)} r={3} fill={s.color} stroke="var(--surface)" strokeWidth={1.5} />;
+            return <circle key={`d${s.id ?? s.label}`} cx={sx(p.x)} cy={sy(p.y)} r={3} fill={s.color} stroke="var(--surface)" strokeWidth={1.5} />;
           })}
       </svg>
 
@@ -313,11 +390,11 @@ export function LineChart({
         >
           <div style={{ color: 'var(--ink-faint)', marginBottom: 2 }}>{xFormat(baseX[hover].x)}</div>
           {series.map((s) => {
-            const p = s.points[hover];
+            const p = nearestPoint(s.points, baseX[hover].x);
             if (!p || !Number.isFinite(p.y)) return null;
             const fmt = s.axis === 'right' ? yRightFormat : yFormat;
             return (
-              <div key={`t${s.label}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+              <div key={`t${s.id ?? s.label}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
                 <span style={{ color: s.color }}>{s.label}</span>
                 <span>{fmt(p.y)}</span>
               </div>
