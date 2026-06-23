@@ -23,3 +23,6 @@ research/data/
 *.sqlite3
 *.db
 *.log
+
+# Claude Code worktrees
+.claude/worktrees/
