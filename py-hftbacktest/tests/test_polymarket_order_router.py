@@ -77,6 +77,50 @@ class TestOrderRouter(unittest.TestCase):
         self.assertEqual(result["status"], "accepted")
         self.assertEqual(result["order_id"], "ORDER-RECOVERED")
 
+    def test_submit_marks_stuck_row_with_no_order_id_as_needs_manual_review(self):
+        # Simulate a crash that happened *before* place_limit_order ever
+        # returned (or before its result was recorded): the row exists and is
+        # stuck in "submitting", but order_id is still NULL. There is nothing
+        # to query the exchange about, so the router must not guess -- it
+        # should flag this for manual review without calling place_limit_order
+        # or get_order at all.
+        stuck_intent = _intent()
+        ledger.record_intent(self.conn, stuck_intent, status="submitting")
+        # order_id stays NULL (the default from record_intent's INSERT).
+
+        client = MagicMock()
+        router = OrderRouter(client, self.conn)
+
+        result = router.submit(stuck_intent)
+
+        client.get_order.assert_not_called()
+        client.place_limit_order.assert_not_called()
+        self.assertEqual(result["status"], "unknown_needs_manual_review")
+        self.assertIsNone(result["order_id"])
+
+    def test_submit_leaves_row_submitting_if_get_order_raises_during_recovery(self):
+        # Simulate a crash where an order_id was learned before the process
+        # died, but when we try to recover by asking the exchange about it,
+        # the get_order() call itself fails (unknown order_id on the exchange
+        # side, transient network error, etc). We must not guess
+        # accepted/rejected in this case -- the row should remain
+        # "submitting" so a later submit() call retries recovery, and the
+        # exception must not propagate out of submit().
+        stuck_intent = _intent()
+        ledger.record_intent(self.conn, stuck_intent, status="submitting")
+        ledger.record_result(self.conn, stuck_intent.idempotency_key, status="submitting", order_id="ORDER-PENDING")
+
+        client = MagicMock()
+        client.get_order.side_effect = RuntimeError("exchange lookup failed")
+        router = OrderRouter(client, self.conn)
+
+        result = router.submit(stuck_intent)
+
+        client.get_order.assert_called_once()
+        client.place_limit_order.assert_not_called()
+        self.assertEqual(result["status"], "submitting")
+        self.assertEqual(result["order_id"], "ORDER-PENDING")
+
     def test_submit_records_rejected_result(self):
         client = MagicMock()
         client.place_limit_order.return_value = DryRunOrderResult(

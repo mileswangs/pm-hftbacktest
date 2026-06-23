@@ -44,7 +44,14 @@ class OrderRouter:
         # ask Polymarket directly before doing anything else with this key.
         order_id = existing.get("order_id")
         if order_id:
-            real = self._client.get_order(order_id)
+            try:
+                real = self._client.get_order(order_id)
+            except Exception:
+                # The exchange lookup itself failed (unknown order_id, transient
+                # network error, etc). We still don't know what happened to the
+                # order, so do NOT guess accepted/rejected -- leave the row in
+                # "submitting" so the next submit() call retries recovery.
+                return ledger.find_intent(self._conn, key)
             status = "accepted" if real.ok else "rejected"
             ledger.record_result(self._conn, key, status=status, order_id=real.order_id)
         else:
