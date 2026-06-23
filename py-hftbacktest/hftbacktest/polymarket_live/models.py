@@ -66,6 +66,7 @@ class PolymarketOrderIntent:
     size: Decimal
     time_in_force: PolymarketTimeInForce = PolymarketTimeInForce.GTC
     builder_code: Optional[str] = None
+    idempotency_key: Optional[str] = None
 
 
 @dataclass(frozen=True)
