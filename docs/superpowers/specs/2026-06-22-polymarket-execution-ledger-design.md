@@ -207,3 +207,19 @@ treated as "did or didn't happen" by assumption.
 3. On-chain allowance/approval orchestration (currently assumed pre-existing).
 4. Frontend trading UI (monitoring the ledger, manual approve/reject, eventually
    one-click or auto trading) on the existing pages.
+5. **Verifying the real `PolymarketExecutionClient`'s return shape against
+   `OrderRouter`'s assumptions.** `OrderRouter`/`DryRunExecutionClient` assume
+   `place_limit_order`/`get_order` return something with `.ok`/`.order_id`
+   (mirroring the official SDK's `AcceptedOrder`/`RejectedOrder` union, per
+   research done this round). This was never confirmed against a live call
+   through `execution.py` — the `polymarket-client` package is an optional
+   dependency and isn't installed in this environment. Before `OrderRouter` is
+   ever pointed at the real client (not `DryRunExecutionClient`), write one
+   adapter test against the actual SDK response object. Flagged by the final
+   whole-branch review (2026-06-22).
+6. **Backfill `fill_id` collision risk.** `backfill_polymarket_ledger.py` uses
+   the bare `transactionHash` as `fills.fill_id` (a `PRIMARY KEY`). A single tx
+   that settles multiple legs would collide and abort the backfill partway
+   through. Fix by suffixing with a leg index before relying on this script
+   for a wallet with multi-leg transactions. Flagged by the final whole-branch
+   review (2026-06-22).
