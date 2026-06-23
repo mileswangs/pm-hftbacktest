@@ -1,0 +1,104 @@
+import tempfile
+import unittest
+from dataclasses import replace
+from decimal import Decimal
+from pathlib import Path
+from unittest.mock import MagicMock
+
+from hftbacktest.polymarket_live import ledger
+from hftbacktest.polymarket_live.dry_run import DryRunExecutionClient, DryRunOrderResult
+from hftbacktest.polymarket_live.models import PolymarketOrderIntent, PolymarketSide, PolymarketTimeInForce
+from hftbacktest.polymarket_live.order_router import OrderRouter
+
+
+def _intent(**overrides):
+    base = dict(
+        token_id="111", side=PolymarketSide.BUY, price=Decimal("0.5"),
+        size=Decimal("10"), time_in_force=PolymarketTimeInForce.GTC,
+        idempotency_key="fixed-key",
+    )
+    base.update(overrides)
+    return PolymarketOrderIntent(**base)
+
+
+class TestOrderRouter(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.conn = ledger.connect(Path(self._tmp.name) / "ledger.sqlite3")
+        ledger.init_schema(self.conn)
+
+    def tearDown(self):
+        self.conn.close()
+        self._tmp.cleanup()
+
+    def test_submit_forces_fok_even_if_caller_passed_gtc(self):
+        client = DryRunExecutionClient()
+        router = OrderRouter(client, self.conn)
+
+        router.submit(_intent(time_in_force=PolymarketTimeInForce.GTC))
+
+        row = ledger.find_intent(self.conn, "fixed-key")
+        self.assertEqual(row["order_type"], "FOK")
+
+    def test_submit_is_idempotent_on_retry(self):
+        client = MagicMock()
+        client.place_limit_order.return_value = DryRunOrderResult(
+            ok=True, order_id="ORDER-1", status="matched",
+            making_amount=Decimal("10"), taking_amount=Decimal("5"),
+        )
+        router = OrderRouter(client, self.conn)
+
+        first = router.submit(_intent())
+        second = router.submit(_intent())  # simulate a retry after a crash
+
+        self.assertEqual(client.place_limit_order.call_count, 1)
+        self.assertEqual(first["order_id"], "ORDER-1")
+        self.assertEqual(second["order_id"], "ORDER-1")
+
+    def test_submit_resolves_stuck_submitting_row_via_get_order_before_retrying(self):
+        # Simulate a crash: an order_id was already learned (the SDK call
+        # returned before the process died), but record_result() never ran
+        # to mark it accepted/rejected -- it's stuck in "submitting".
+        stuck_intent = _intent()
+        ledger.record_intent(self.conn, stuck_intent, status="submitting")
+        ledger.record_result(self.conn, stuck_intent.idempotency_key, status="submitting", order_id="ORDER-PENDING")
+
+        client = MagicMock()
+        client.get_order.return_value = DryRunOrderResult(
+            ok=True, order_id="ORDER-RECOVERED", status="matched",
+            making_amount=Decimal("10"), taking_amount=Decimal("5"),
+        )
+        router = OrderRouter(client, self.conn)
+
+        result = router.submit(stuck_intent)
+
+        client.get_order.assert_called_once()
+        client.place_limit_order.assert_not_called()
+        self.assertEqual(result["status"], "accepted")
+        self.assertEqual(result["order_id"], "ORDER-RECOVERED")
+
+    def test_submit_records_rejected_result(self):
+        client = MagicMock()
+        client.place_limit_order.return_value = DryRunOrderResult(
+            ok=False, order_id=None, status="rejected",
+            making_amount=Decimal("0"), taking_amount=Decimal("0"),
+        )
+        router = OrderRouter(client, self.conn)
+
+        result = router.submit(_intent())
+
+        self.assertEqual(result["status"], "rejected")
+        self.assertIsNone(result["order_id"])
+
+    def test_cancel_delegates_to_execution_client(self):
+        client = DryRunExecutionClient()
+        router = OrderRouter(client, self.conn)
+        placed = router.submit(_intent())
+
+        result = router.cancel(placed["order_id"])
+
+        self.assertEqual(result["canceled"], [placed["order_id"]])
+
+
+if __name__ == "__main__":
+    unittest.main()
