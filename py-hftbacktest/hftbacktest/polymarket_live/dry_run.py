@@ -38,8 +38,12 @@ class DryRunExecutionClient:
         return result
 
     def cancel_order(self, order_id: str) -> dict:
-        self._orders.pop(order_id, None)
+        if order_id not in self._orders:
+            raise ValueError(f"Order {order_id} not found")
+        self._orders.pop(order_id)
         return {"canceled": [order_id]}
 
     def get_order(self, order_id: str) -> DryRunOrderResult:
+        if order_id not in self._orders:
+            raise ValueError(f"Order {order_id} not found")
         return self._orders[order_id]

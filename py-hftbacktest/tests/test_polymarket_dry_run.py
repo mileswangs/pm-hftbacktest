@@ -46,6 +46,16 @@ class TestDryRunExecutionClient(unittest.TestCase):
         result = self.client.cancel_order(placed.order_id)
         self.assertEqual(result["canceled"], [placed.order_id])
 
+    def test_get_order_raises_for_unknown_order_id(self):
+        with self.assertRaises(ValueError) as cm:
+            self.client.get_order("NONEXISTENT-123")
+        self.assertIn("not found", str(cm.exception))
+
+    def test_cancel_order_raises_for_unknown_order_id(self):
+        with self.assertRaises(ValueError) as cm:
+            self.client.cancel_order("NONEXISTENT-456")
+        self.assertIn("not found", str(cm.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
