@@ -144,5 +144,67 @@ class TestOrderRouter(unittest.TestCase):
         self.assertEqual(result["canceled"], [placed["order_id"]])
 
 
+class TestOrderRouterRealClientGuard(unittest.TestCase):
+    """Covers the dry-run-only guard described at the top of order_router.py:
+    OrderRouter must refuse the real PolymarketExecutionClient unless the
+    caller explicitly confirms the US-jurisdiction and real-money risk.
+    Plain test doubles (e.g. bare MagicMock(), as used throughout
+    TestOrderRouter above) are not the real client and remain unaffected.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.conn = ledger.connect(Path(self._tmp.name) / "ledger.sqlite3")
+        ledger.init_schema(self.conn)
+
+    def tearDown(self):
+        self.conn.close()
+        self._tmp.cleanup()
+
+    def _real_client(self):
+        from hftbacktest.polymarket_live.config import PolymarketSettings
+        from hftbacktest.polymarket_live.execution import PolymarketExecutionClient
+
+        # Constructing PolymarketExecutionClient does not touch the network
+        # (the SDK is imported lazily inside its methods), so this is safe to
+        # instantiate directly in a test as a stand-in for "the real client".
+        return PolymarketExecutionClient(settings=PolymarketSettings(private_key="test-key"))
+
+    def test_dry_run_client_is_allowed_with_no_flag(self):
+        client = DryRunExecutionClient()
+
+        router = OrderRouter(client, self.conn)
+
+        self.assertIs(router._client, client)
+
+    def test_plain_mock_client_is_allowed_with_no_flag(self):
+        # A bare MagicMock() standing in for "not the real client" (as used
+        # throughout TestOrderRouter) must keep working unflagged -- the
+        # guard targets the real PolymarketExecutionClient specifically, not
+        # every object that isn't literally a DryRunExecutionClient.
+        not_dry_run = MagicMock()
+
+        router = OrderRouter(not_dry_run, self.conn)
+
+        self.assertIs(router._client, not_dry_run)
+
+    def test_real_execution_client_without_flag_raises(self):
+        real_client = self._real_client()
+
+        with self.assertRaises(RuntimeError):
+            OrderRouter(real_client, self.conn)
+
+    def test_real_execution_client_with_flag_true_is_allowed(self):
+        real_client = self._real_client()
+
+        router = OrderRouter(
+            real_client,
+            self.conn,
+            i_confirm_non_us_jurisdiction_and_real_money_risk=True,
+        )
+
+        self.assertIs(router._client, real_client)
+
+
 if __name__ == "__main__":
     unittest.main()
