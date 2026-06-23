@@ -48,6 +48,17 @@ anyway, so reusing those traits would buy us nothing.)
 
 ## 2. Constraints & Non-Goals
 
+- **No real order placement from a US IP.** Polymarket prohibits US persons /
+  US-IP trading. The development machine this was built on is US-based, so
+  switching `OrderRouter` from `DryRunExecutionClient` to the real
+  `PolymarketExecutionClient` must not happen from this machine or any other
+  US-IP environment — this is a compliance blocker, not a code-readiness
+  question, and it is independent of whether the code itself is correct.
+  Whoever eventually flips that config flag must do so from a non-US
+  environment, and should re-confirm this constraint still applies (rules can
+  change) before doing so. Everything built and tested in this plan runs only
+  against `DryRunExecutionClient` or read-only public endpoints — nothing here
+  required or used a US-restricted code path.
 - **No strategy wiring.** Nothing in this spec decides *when* to trade based
   on METAR or Weather Study signals. That is a separate, later sub-project.
 - **No risk controls** (position limits, circuit breakers, kill switch) beyond
