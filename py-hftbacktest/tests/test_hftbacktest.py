@@ -9,7 +9,7 @@ from hftbacktest import (
     HashMapMarketDepthBacktest,
     ALL_ASSETS, ROIVectorMarketDepthBacktest,
     DEPTH_CLEAR_EVENT, DEPTH_SNAPSHOT_EVENT, BUY_EVENT, SELL_EVENT,
-    EXCH_EVENT, LOCAL_EVENT, polymarket_to_hbt
+    EXCH_EVENT, LOCAL_EVENT, TRADE_EVENT, polymarket_to_hbt
 )
 from hftbacktest.stats import PolyAssetRecord, fix_record_prices
 
@@ -114,7 +114,6 @@ class TestPyHftBacktest(unittest.TestCase):
                 'trade_is_mirror': [None, None],
                 'winning_outcome': [None, 'Yes'],
             },
-            constant_lantency=100,
         )
 
         event_mask = np.uint64(
@@ -160,7 +159,6 @@ class TestPyHftBacktest(unittest.TestCase):
                 'trade_is_mirror': [None, None],
                 'winning_outcome': [None, None],
             },
-            constant_lantency=100,
         )
 
         event_mask = np.uint64(
@@ -180,6 +178,83 @@ class TestPyHftBacktest(unittest.TestCase):
         self.assertEqual(len(ask_clears), 1)
         self.assertEqual(bid_clears['px'][0], 0.0)
         self.assertEqual(ask_clears['px'][0], 1.0)
+
+    def test_polymarket_to_hbt_accepts_separate_trade_df(self):
+        data = polymarket_to_hbt(
+            {
+                'market_slug': ['m'],
+                'timestamp': [1_000],
+                'local_timestamp': [1_100],
+                'event_type': ['book'],
+                'ask_prices': [[0.6]],
+                'ask_sizes': [[10.0]],
+                'bid_prices': [[0.4]],
+                'bid_sizes': [[10.0]],
+                'best_ask': [0.6],
+                'best_bid': [0.4],
+                'pc_price': [None],
+                'pc_size': [None],
+                'pc_side': [None],
+                'new_tick_size': [None],
+                'winning_outcome': [None],
+            },
+            trade_df={
+                'market_slug': ['m', 'm'],
+                'timestamp': [1_500, 1_600],
+                'local_timestamp': [1_550, 1_650],
+                'event_type': ['last_trade_price', 'ignored'],
+                'outcome': ['Yes', 'No'],
+                'price': [0.7, 0.2],
+                'size': [3.0, 4.0],
+                'side': ['BUY', 'SELL'],
+            },
+        )
+
+        event_mask = np.uint64(
+            ~(EXCH_EVENT | LOCAL_EVENT) & np.iinfo(np.uint64).max
+        )
+        base_ev = data['ev'] & event_mask
+        trades = data[base_ev == (TRADE_EVENT | BUY_EVENT)]
+
+        self.assertEqual(len(trades), 2)
+        self.assertEqual(trades['exch_ts'][0], 1_500_000_000)
+        self.assertEqual(trades['local_ts'][0], 1_550_000_000)
+        self.assertEqual(trades['px'][0], 0.7)
+        self.assertEqual(trades['qty'][0], 3.0)
+        self.assertEqual(trades['exch_ts'][1], 1_600_000_000)
+        self.assertEqual(trades['local_ts'][1], 1_650_000_000)
+        self.assertEqual(trades['px'][1], 0.8)
+        self.assertEqual(trades['qty'][1], 4.0)
+
+    def test_polymarket_to_hbt_rejects_null_trade_price(self):
+        with self.assertRaises(ValueError):
+            polymarket_to_hbt(
+                {
+                    'market_slug': ['m'],
+                    'timestamp': [1_000],
+                    'local_timestamp': [1_100],
+                    'event_type': ['book'],
+                    'ask_prices': [[0.6]],
+                    'ask_sizes': [[10.0]],
+                    'bid_prices': [[0.4]],
+                    'bid_sizes': [[10.0]],
+                    'best_ask': [0.6],
+                    'best_bid': [0.4],
+                    'pc_price': [None],
+                    'pc_size': [None],
+                    'pc_side': [None],
+                    'new_tick_size': [None],
+                    'winning_outcome': [None],
+                },
+                trade_df={
+                    'timestamp': [1_500],
+                    'local_timestamp': [1_550],
+                    'outcome': ['Yes'],
+                    'price': [None],
+                    'size': [3.0],
+                    'side': ['BUY'],
+                },
+            )
 
     def test_run_backtest(self):
         arr = np.load('tmp_20240501.npz')['data']

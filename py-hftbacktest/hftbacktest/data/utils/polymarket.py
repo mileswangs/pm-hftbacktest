@@ -31,10 +31,7 @@ def _ts_ns_expr(df: pl.DataFrame, col: str = "timestamp") -> pl.Expr:
 def _local_ts_ns_expr(
     df: pl.DataFrame,
     exch_ts_expr: pl.Expr,
-    constant_lantency: int | None,
 ) -> pl.Expr:
-    if constant_lantency is not None:
-        return exch_ts_expr + constant_lantency
     if "local_timestamp" not in df.columns:
         return exch_ts_expr + DEFAULT_LATENCY_NS
     return _ts_ns_expr(df, "local_timestamp")
@@ -153,62 +150,105 @@ def _append_resolved_book(df: pl.DataFrame) -> pl.DataFrame:
     return pl.concat([df, pl.DataFrame([book], schema=df.schema)], how="vertical")
 
 
+def _copy_structured(arr: NDArray) -> NDArray:
+    out = np.zeros(len(arr), dtype=event_dtype)
+    for col in event_dtype.names:
+        out[col] = arr[col]
+    return out
+
+
+def _normalize_trade_outcome(trade_df: pl.DataFrame) -> pl.DataFrame:
+    if "price" not in trade_df.columns:
+        raise ValueError("trade_df must contain a price column.")
+    if trade_df["price"].null_count() > 0:
+        raise ValueError("trade_df price cannot contain null values.")
+
+    if "outcome" not in trade_df.columns:
+        return trade_df
+
+    side_expr = pl.col("side").cast(pl.Utf8).str.to_uppercase()
+    outcome_expr = pl.col("outcome").cast(pl.Utf8).str.to_lowercase()
+    is_no_expr = outcome_expr.is_in(["no", "false", "0", "down"])
+
+    return trade_df.with_columns(
+        pl.when(is_no_expr)
+        .then(1.0 - pl.col("price").cast(pl.Float64))
+        .otherwise(pl.col("price").cast(pl.Float64))
+        .alias("price"),
+        pl.when(is_no_expr & (side_expr == "BUY"))
+        .then(pl.lit("SELL"))
+        .when(is_no_expr & (side_expr == "SELL"))
+        .then(pl.lit("BUY"))
+        .otherwise(side_expr)
+        .alias("side"),
+    )
+
+
+def _make_trade_events_from_normalized(
+    trade_data: pl.DataFrame,
+    price_col: str,
+    size_col: str,
+    side_col: str,
+) -> NDArray:
+    if len(trade_data) == 0:
+        return np.zeros(0, dtype=event_dtype)
+    for col in [price_col, size_col, side_col]:
+        if col not in trade_data.columns:
+            raise ValueError(f"trade_df must contain a {col} column.")
+
+    ts_expr = _ts_ns_expr(trade_data)
+    local_ts_expr = _local_ts_ns_expr(trade_data, ts_expr)
+    side_expr = pl.col(side_col).cast(pl.Utf8).str.to_uppercase()
+    is_buy_expr = side_expr == "BUY"
+
+    arr = (
+        trade_data.with_columns(
+            pl.when(is_buy_expr)
+            .then(pl.lit(TRADE_EVENT | BUY_EVENT))
+            .otherwise(pl.lit(TRADE_EVENT | SELL_EVENT))
+            .cast(pl.UInt64)
+            .alias("ev"),
+            ts_expr.alias("exch_ts"),
+            local_ts_expr.alias("local_ts"),
+            pl.col(price_col).cast(pl.Float64).alias("px"),
+            pl.col(size_col).cast(pl.Float64).alias("qty"),
+            pl.lit(0).cast(pl.UInt64).alias("order_id"),
+            pl.lit(0).cast(pl.Int64).alias("ival"),
+            pl.lit(0.0).alias("fval"),
+        )
+        .select(HBT_COLS)
+        .to_numpy(structured=True)
+    )
+    return _copy_structured(arr)
+
+
 def polymarket_to_hbt(
     l2_df: Any,
-    constant_lantency: int | None = None,
+    trade_df: Any | None = None,
 ) -> NDArray:
     r"""
-    Converts a Polymarket L2 DataFrame into an HftBacktest event array.
+    Converts Polymarket L2 and trade DataFrames into an HftBacktest event array.
 
     Args:
         l2_df: DataFrame containing the Polymarket L2 data.
-        constant_lantency: Optional fixed latency in nanoseconds. When provided,
-                           it takes priority over local_timestamp. Otherwise,
-                           local_timestamp is used if available, falling back
-                           to 20ms.
+        trade_df: Optional DataFrame containing Polymarket trade data. Expected
+                  columns are timestamp, local_timestamp, outcome, price, size,
+                  and side. market_slug and event_type are ignored.
     """
-    df = pl.DataFrame(l2_df)
-    df = _append_resolved_book(df)
+    l2_df = pl.DataFrame(l2_df)
+    l2_df = _append_resolved_book(l2_df)
 
-    ts_expr = _ts_ns_expr(df)
-    local_ts_expr = _local_ts_ns_expr(df, ts_expr, constant_lantency)
+    ts_expr = _ts_ns_expr(l2_df)
+    local_ts_expr = _local_ts_ns_expr(l2_df, ts_expr)
     parts: list[NDArray] = []
 
-    books = df.filter(pl.col("event_type") == "book")
+    books = l2_df.filter(pl.col("event_type") == "book")
     if len(books) > 0:
         book_events = _make_book_events(books, ts_expr, local_ts_expr)
         if len(book_events) > 0:
             parts.append(book_events)
 
-    trades = df.filter(
-        (pl.col("event_type") == "last_trade_price")
-        & pl.col("trade_price").is_not_null()
-    )
-    if len(trades) > 0:
-        arr = (
-            trades.with_columns(
-                pl.when(pl.col("trade_side") == "BUY")
-                .then(pl.lit(TRADE_EVENT | BUY_EVENT))
-                .otherwise(pl.lit(TRADE_EVENT | SELL_EVENT))
-                .cast(pl.UInt64)
-                .alias("ev"),
-                ts_expr.alias("exch_ts"),
-                local_ts_expr.alias("local_ts"),
-                pl.col("trade_price").cast(pl.Float64).alias("px"),
-                pl.col("trade_size").cast(pl.Float64).alias("qty"),
-                pl.lit(0).cast(pl.UInt64).alias("order_id"),
-                pl.lit(0).cast(pl.Int64).alias("ival"),
-                pl.lit(0.0).alias("fval"),
-            )
-            .select(HBT_COLS)
-            .to_numpy(structured=True)
-        )
-        out = np.zeros(len(arr), dtype=event_dtype)
-        for col in event_dtype.names:
-            out[col] = arr[col]
-        parts.append(out)
-
-    price_changes = df.filter(
+    price_changes = l2_df.filter(
         (pl.col("event_type") == "price_change") & pl.col("pc_price").is_not_null()
     )
     if len(price_changes) > 0:
@@ -230,10 +270,18 @@ def polymarket_to_hbt(
             .select(HBT_COLS)
             .to_numpy(structured=True)
         )
-        out = np.zeros(len(arr), dtype=event_dtype)
-        for col in event_dtype.names:
-            out[col] = arr[col]
-        parts.append(out)
+        parts.append(_copy_structured(arr))
+
+    if trade_df is not None:
+        normalized_trade_df = _normalize_trade_outcome(pl.DataFrame(trade_df))
+        trade_events = _make_trade_events_from_normalized(
+            normalized_trade_df,
+            "price",
+            "size",
+            "side",
+        )
+        if len(trade_events) > 0:
+            parts.append(trade_events)
 
     if not parts:
         return np.zeros(0, dtype=event_dtype)
