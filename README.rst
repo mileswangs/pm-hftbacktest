@@ -2,32 +2,32 @@
 Polymarket HftBacktest
 ======================
 
-核心特性
-========
+Key Features
+============
 
-* Polymarket tick 级别回测
-* 使用 `Numba <https://numba.pydata.org/>`_ JIT 和 Rust 实现快速执行
-* 面向策略研究和撮合执行模拟
-* 兼容 hftbacktest 生态
+* Tick-level Polymarket backtesting
+* Fast execution with `Numba <https://numba.pydata.org/>`_ JIT and Rust
+* Built for strategy research and exchange execution simulation
+* Compatible with the hftbacktest ecosystem
 
-快速开始
-========
+Quick Start
+===========
 
-安装
-----
+Installation
+------------
 
 .. code-block:: console
 
    pip install pm-hftbacktest
 
-数据获取
---------
+Data
+----
 
-polymarket数据pmdata.dev **免费** 提供，请先从
-`pmdata.dev <https://pmdata.dev/>`_ 获取 API key。
+Polymarket data is available for **free** from pmdata.dev. Get an API key from
+`pmdata.dev <https://pmdata.dev/>`_ before running the example.
 
-示例
-====
+Example
+=======
 
 .. code-block:: python
 
@@ -46,9 +46,9 @@ polymarket数据pmdata.dev **免费** 提供，请先从
    import numpy as np
 
 
-   # 扫尾盘策略。
+   # Endgame trading strategy.
    @njit
-   def endline_trading(
+   def endgame_trading(
        hbt,
        recorder,
        up_trigger: float,
@@ -63,9 +63,11 @@ polymarket数据pmdata.dev **免费** 提供，请先从
        hbt_tick_size = hbt.depth(asset_no).tick_size
        price_tick_size = 0.01
 
-       # 策略状态：只触发一次、止损一次，避免在同一段尾盘行情里反复开平仓。
+       # Strategy state: enter once and stop once to avoid repeated
+       # open/close cycles in the same endgame move.
        activated = False
-       # side=1 表示买 UP；side=-1 表示买 DOWN，在 UP 合约上表现为卖出。
+       # side=1 means buying UP; side=-1 means buying DOWN, represented
+       # as selling the UP contract.
        side = 0
        submitted_once = False
        stop_submitted = False
@@ -73,21 +75,24 @@ polymarket数据pmdata.dev **免费** 提供，请先从
        up_trigger = min(max(up_trigger, price_tick_size), 1.0 - price_tick_size)
        down_trigger = 1.0 - up_trigger
 
-       # stop_long 是 UP 多头止损线；DOWN 方向使用对称的 stop_short。
+       # stop_long is the UP long stop level. The DOWN side uses the
+       # symmetric stop_short level.
        stop_long = min(max(stop_long, price_tick_size), 1.0 - price_tick_size)
        stop_short = 1.0 - stop_long
        order_qty = np.float64(max(order_qty, 0.0))
 
-       # 每 100ms 运行一轮策略逻辑。
+       # Run strategy logic every 100ms.
        while hbt.elapse(100_000_000) == 0:
            hbt.clear_inactive_orders(asset_no)
            depth = hbt.depth(asset_no)
 
-           # 使用 mid 作为触发价，减少单边盘口噪声影响。
+           # Use the mid price as the trigger price to reduce one-sided
+           # order book noise.
            bid, ask = depth.best_bid, depth.best_ask
            mid = (bid + ask) / 2.0
 
-           # 进入尾盘确定性区域：向上突破买 UP，向下突破买 DOWN。
+           # Enter the endgame certainty zone: buy UP on an upside break
+           # and buy DOWN on a downside break.
            if not activated:
                if mid >= up_trigger:
                    activated = True
@@ -96,7 +101,7 @@ polymarket数据pmdata.dev **免费** 提供，请先从
                    activated = True
                    side = -1
 
-           # 触发后只提交一次开仓单。
+           # Submit the entry order only once after the trigger.
            if activated and (not submitted_once):
                if side > 0:
                    p = up_trigger
@@ -106,7 +111,8 @@ polymarket数据pmdata.dev **免费** 提供，请先从
                p = round(p / price_tick_size) * price_tick_size
                p = max(price_tick_size, min(1.0 - price_tick_size, p))
 
-               # 单次提交场景里，直接用价格 tick 序号作为 order id。
+               # For a single-submit example, use the price tick index
+               # directly as the order id.
                oid = np.uint64(round(p / hbt_tick_size))
 
                if side > 0:
@@ -115,7 +121,8 @@ polymarket数据pmdata.dev **免费** 提供，请先从
                    hbt.submit_sell_order(asset_no, oid, p, order_qty, GTC, LIMIT, False)
                submitted_once = True
 
-           # position 是 UP 合约净仓位：正数为持有 UP，负数可理解为持有 DOWN。
+           # position is the net position in the UP contract: positive means
+           # holding UP, while negative can be interpreted as holding DOWN.
            pos = hbt.position(asset_no)
            if (not stop_submitted) and (pos != 0):
                need_stop = (pos > 0 and mid <= stop_long) or (
@@ -151,21 +158,25 @@ polymarket数据pmdata.dev **免费** 提供，请先从
 
 
    slug = "btc-updown-15m-1778263200"
-   data_type = "poly_l2"  # or "poly_snapshot"
-   url = f"https://api.pmdata.dev/download/{data_type}/{slug}.parquet"
-   # Get your Free API key from https://pmdata.dev/
-   df = pd.read_parquet(
-       url,
-       storage_options={"api_key": "<YOUR_API_KEY>", "User-Agent": "Mozilla/5.0"},
+   api_key = "<YOUR_API_KEY>"
+   storage_options = {"api_key": api_key, "User-Agent": "Mozilla/5.0"}
+
+   l2_df = pd.read_parquet(
+       f"https://api.pmdata.dev/download/poly_l2/{slug}.parquet",
+       storage_options=storage_options,
+   )
+   trade_df = pd.read_parquet(
+       f"https://api.pmdata.dev/download/poly_trade/{slug}.parquet",
+       storage_options=storage_options,
    )
 
-   data = polymarket_to_hbt(df)
+   data = polymarket_to_hbt(l2_df, trade_df=trade_df)
 
    asset = BacktestAssetPoly().data(data)
    hbt = ROIVectorMarketDepthBacktest([asset])
    recorder = Recorder(hbt.num_assets, 5_000_000)
 
-   endline_trading(
+   endgame_trading(
        hbt,
        recorder.recorder,
        up_trigger=0.84,
