@@ -8,6 +8,7 @@ mod latency;
 mod queue;
 
 pub use fee::{
+    BinaryFeeModel,
     CommonFees,
     DirectionalFees,
     FeeModel,

@@ -119,8 +119,7 @@ def _settle_price_from_winning_outcome(winning_outcome: Any) -> float | None:
 
 def _append_resolved_book(df: pl.DataFrame) -> pl.DataFrame:
     resolved = (
-        df
-        .filter(pl.col("event_type") == "market_resolved")
+        df.filter(pl.col("event_type") == "market_resolved")
         .filter(pl.col("winning_outcome").is_not_null())
         .sort("timestamp")
     )

@@ -172,7 +172,14 @@ Example
 
    data = polymarket_to_hbt(l2_df, trade_df=trade_df)
 
-   asset = BacktestAssetPoly().data(data)
+   asset = (
+       BacktestAssetPoly()
+       .data(data)
+       .binary_fee_model(
+           maker_fee_rate=-0.07 * 0.2,
+           taker_fee_rate=0.07,
+       )
+   )
    hbt = ROIVectorMarketDepthBacktest([asset])
    recorder = Recorder(hbt.num_assets, 5_000_000)
 

@@ -8,10 +8,11 @@ from hftbacktest import (
     BacktestAssetPoly,
     HashMapMarketDepthBacktest,
     ALL_ASSETS, ROIVectorMarketDepthBacktest,
-    DEPTH_CLEAR_EVENT, DEPTH_SNAPSHOT_EVENT, BUY_EVENT, SELL_EVENT,
+    DEPTH_EVENT, DEPTH_CLEAR_EVENT, DEPTH_SNAPSHOT_EVENT, BUY_EVENT, SELL_EVENT,
     EXCH_EVENT, LOCAL_EVENT, TRADE_EVENT, polymarket_to_hbt
 )
 from hftbacktest.stats import PolyAssetRecord, fix_record_prices
+from hftbacktest.types import event_dtype
 
 
 @njit
@@ -67,6 +68,64 @@ class TestPyHftBacktest(unittest.TestCase):
         )
 
         self.assertIsInstance(asset, BacktestAsset)
+
+    def test_binary_fee_model_uses_fill_quantity_and_price(self):
+        data = np.array(
+            [
+                (
+                    DEPTH_SNAPSHOT_EVENT | BUY_EVENT | EXCH_EVENT | LOCAL_EVENT,
+                    1_000,
+                    1_000,
+                    0.3,
+                    100.0,
+                    0,
+                    0,
+                    0.0,
+                ),
+                (
+                    DEPTH_SNAPSHOT_EVENT | SELL_EVENT | EXCH_EVENT | LOCAL_EVENT,
+                    1_000,
+                    1_000,
+                    0.4,
+                    100.0,
+                    0,
+                    0,
+                    0.0,
+                ),
+                (
+                    DEPTH_EVENT | BUY_EVENT | EXCH_EVENT | LOCAL_EVENT,
+                    1_000_000_000,
+                    1_000_000_000,
+                    0.3,
+                    100.0,
+                    0,
+                    0,
+                    0.0,
+                ),
+            ],
+            dtype=event_dtype,
+        )
+        for backtest_cls in (HashMapMarketDepthBacktest, ROIVectorMarketDepthBacktest):
+            with self.subTest(backtest_cls=backtest_cls.__name__):
+                asset = (
+                    BacktestAssetPoly()
+                        .data(data.copy())
+                        .constant_order_latency(0, 0)
+                        .no_partial_fill_exchange()
+                        .binary_fee_model(-0.01, 0.02)
+                )
+                hbt = backtest_cls([asset])
+
+                try:
+                    self.assertEqual(hbt.elapse(1), 0)
+                    self.assertAlmostEqual(hbt.depth(0).best_ask, 0.4)
+                    self.assertEqual(
+                        hbt.submit_buy_order(0, 1, 0.4, 100.0, 0, 0, True),
+                        0,
+                    )
+                    self.assertAlmostEqual(hbt.state_values(0).fee, 0.48)
+                finally:
+                    hbt.close()
 
     def test_poly_asset_record_fixes_prices_and_computes_earn(self):
         record = np.array(

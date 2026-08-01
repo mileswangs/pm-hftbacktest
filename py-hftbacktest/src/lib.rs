@@ -13,6 +13,7 @@ use hftbacktest::{
         assettype::{InverseAsset, LinearAsset},
         data::{Data, DataPtr, FeedLatencyAdjustment, Reader, read_npz_file},
         models::{
+            BinaryFeeModel,
             CommonFees,
             ConstantLatency,
             FlatPerTradeFeeModel,
@@ -102,6 +103,7 @@ pub enum FeeModel {
     TradingValueFeeModel { fees: CommonFees },
     TradingQtyFeeModel { fees: CommonFees },
     FlatPerTradeFeeModel { fees: CommonFees },
+    BinaryFeeModel { fees: CommonFees },
 }
 
 /// Builds a backtesting asset.
@@ -490,6 +492,21 @@ impl BacktestAsset {
         };
         slf
     }
+
+    /// Uses `BinaryFeeModel` for binary outcome contracts.
+    ///
+    /// The fee amount is `quantity * fee_rate * price * (1 - price)`, calculated from each fill's
+    /// execution quantity and execution price. A negative fee rate represents rebates.
+    pub fn binary_fee_model(
+        mut slf: PyRefMut<Self>,
+        maker_fee_rate: f64,
+        taker_fee_rate: f64,
+    ) -> PyRefMut<Self> {
+        slf.fee_model = FeeModel::BinaryFeeModel {
+            fees: CommonFees::new(maker_fee_rate, taker_fee_rate),
+        };
+        slf
+    }
 }
 
 #[pymodule]
@@ -556,6 +573,7 @@ pub fn build_hashmap_backtest(assets: Vec<PyRefMut<BacktestAsset>>) -> PyResult<
                 TradingValueFeeModel { fees },
                 TradingQtyFeeModel { fees },
                 FlatPerTradeFeeModel { fees },
+                BinaryFeeModel { fees },
             ]
         );
         local.push(asst.local);
@@ -613,6 +631,7 @@ pub fn build_roivec_backtest(assets: Vec<PyRefMut<BacktestAsset>>) -> PyResult<u
                 TradingValueFeeModel { fees },
                 TradingQtyFeeModel { fees },
                 FlatPerTradeFeeModel { fees },
+                BinaryFeeModel { fees },
             ]
         );
         local.push(asst.local);
