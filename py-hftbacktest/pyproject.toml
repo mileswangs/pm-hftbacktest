@@ -4,11 +4,11 @@ build-backend = "maturin"
 
 [project]
 name = "pm-hftbacktest"
-description = "A polymarket high-frequency trading and market-making backtesting tool"
+description = "High-frequency trading and market-making backtesting for Polymarket, written in Rust."
 readme = "README.rst"
 authors = [{ name = "mileswangs", email = "wangshuosum@gmail.com" }]
 license = { file = "LICENSE" }
-version = "1.0.9"
+version = "1.0.10"
 requires-python = ">=3.11"
 dependencies = [
  "numpy >=2.0, <2.3",
@@ -18,7 +18,20 @@ dependencies = [
  "holoviews"
 ]
 
-keywords = ["hft", "high-frequency trading", "trading", "market-making", "backtest"]
+keywords = [
+  "polymarket",
+  "prediction market",
+  "hft",
+  "high-frequency trading",
+  "trading",
+  "market-making",
+  "backtest",
+  "backtesting",
+  "orderbook",
+  "tick data",
+  "quant",
+  "numba",
+]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
   "Environment :: Console",

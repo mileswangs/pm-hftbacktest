@@ -2,11 +2,30 @@
 Polymarket HftBacktest
 ======================
 
+|pypi| |python| |license|
+
+.. |pypi| image:: https://img.shields.io/pypi/v/pm-hftbacktest.svg
+   :target: https://pypi.org/project/pm-hftbacktest/
+   :alt: PyPI version
+
+.. |python| image:: https://img.shields.io/pypi/pyversions/pm-hftbacktest.svg
+   :target: https://pypi.org/project/pm-hftbacktest/
+   :alt: Python versions
+
+.. |license| image:: https://img.shields.io/github/license/mileswangs/pm-hftbacktest.svg
+   :target: https://github.com/mileswangs/pm-hftbacktest/blob/main/LICENSE
+   :alt: License
+
+**High-frequency trading and market-making backtesting for Polymarket, written in Rust.**
+
 Key Features
 ============
 
 * Tick-level Polymarket backtesting
 * Fast execution with `Numba <https://numba.pydata.org/>`_ JIT and Rust
+* Built-in Polymarket fee model
+* Configurable queue position and latency models
+* **Free** Polymarket tick data from `pmdata.dev <https://pmdata.dev/>`_
 * Built for strategy research and exchange execution simulation
 * Compatible with the hftbacktest ecosystem
 
