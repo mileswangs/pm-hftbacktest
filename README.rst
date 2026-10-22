@@ -60,6 +60,7 @@ Example
        LIMIT,
    )
    from hftbacktest.stats import PolyAssetRecord
+   from datetime import datetime, timezone
    import pandas as pd
    from numba import njit
    import numpy as np
@@ -177,15 +178,17 @@ Example
 
 
    slug = "btc-updown-15m-1778263200"
+   # The date in the URL is the UTC day the market opens.
+   date = datetime.fromtimestamp(int(slug.rsplit("-", 1)[1]), timezone.utc).strftime("%Y/%m/%d")
    api_key = "<YOUR_API_KEY>"
    storage_options = {"api_key": api_key, "User-Agent": "Mozilla/5.0"}
 
    l2_df = pd.read_parquet(
-       f"https://api.pmdata.dev/download/poly_l2/{slug}.parquet",
+       f"https://api.pmdata.dev/v1/polymarket/l2/{date}/{slug}.parquet",
        storage_options=storage_options,
    )
    trade_df = pd.read_parquet(
-       f"https://api.pmdata.dev/download/poly_trade/{slug}.parquet",
+       f"https://api.pmdata.dev/v1/polymarket/trades/{date}/{slug}.parquet",
        storage_options=storage_options,
    )
 
