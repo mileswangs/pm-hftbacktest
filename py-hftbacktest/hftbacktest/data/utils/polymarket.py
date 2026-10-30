@@ -117,17 +117,30 @@ def _settle_price_from_winning_outcome(winning_outcome: Any) -> float | None:
         return None
 
 
-def _append_resolved_book(df: pl.DataFrame) -> pl.DataFrame:
+def resolved_settle_price(df: pl.DataFrame) -> float | None:
+    """The settlement price in the data: the last ``market_resolved`` row's ``winning_outcome``,
+    or ``None`` when the data has none."""
+    if "event_type" not in df.columns or "winning_outcome" not in df.columns:
+        return None
     resolved = (
         df.filter(pl.col("event_type") == "market_resolved")
         .filter(pl.col("winning_outcome").is_not_null())
         .sort("timestamp")
     )
     if len(resolved) == 0:
-        return df
+        return None
+    return _settle_price_from_winning_outcome(resolved.tail(1).to_dicts()[0]["winning_outcome"])
 
-    row = resolved.tail(1).to_dicts()[0]
-    settle_price = _settle_price_from_winning_outcome(row["winning_outcome"])
+
+def check_settle_price(settle_price: float | None) -> float | None:
+    if settle_price is not None and settle_price not in (0.0, 1.0):
+        raise ValueError(f"settle_price must be 0.0 or 1.0, got {settle_price!r}")
+    return settle_price
+
+
+def _append_settle_book(df: pl.DataFrame, settle_price: float | None) -> pl.DataFrame:
+    """Appends the settlement book at the data's last timestamp: a Yes win trades just below
+    1, a No win just above 0, so the record's last price settles the position."""
     if settle_price is None:
         return df
 
@@ -224,6 +237,7 @@ def _make_trade_events_from_normalized(
 def polymarket_to_hbt(
     l2_df: Any,
     trade_df: Any | None = None,
+    settle_price: float | None = None,
 ) -> NDArray:
     r"""
     Converts Polymarket L2 and trade DataFrames into an HftBacktest event array.
@@ -233,9 +247,15 @@ def polymarket_to_hbt(
         trade_df: Optional DataFrame containing Polymarket trade data. Expected
                   columns are timestamp, local_timestamp, outcome, price, size,
                   and side. market_slug and event_type are ignored.
+        settle_price: 1.0 when Yes won, 0.0 when No won: a settlement book is appended at the
+                      data's last timestamp so the position settles. ``None`` (default) takes
+                      it from the data's ``market_resolved`` row, appending nothing when there
+                      is none.
     """
     l2_df = pl.DataFrame(l2_df)
-    l2_df = _append_resolved_book(l2_df)
+    if check_settle_price(settle_price) is None:
+        settle_price = resolved_settle_price(l2_df)
+    l2_df = _append_settle_book(l2_df, settle_price)
 
     ts_expr = _ts_ns_expr(l2_df)
     local_ts_expr = _local_ts_ns_expr(l2_df, ts_expr)

@@ -241,11 +241,11 @@ class BacktestAssetPredictFun(BacktestAsset):
     """
     BacktestAsset preset for Predict.fun data (``predict_fun_to_hbt``).
 
-    The Predict.fun-specific fixed settings are applied at construction time: a 0.01 tick
-    (``decimalPrecision`` 2) and prices in [0, 1]; ``binary_fee_model`` uses the ``linear`` fee
-    curve (``min(price, 1 - price)``). Data, latency, and fee rates remain configurable through
-    the normal BacktestAsset chain methods; Predict.fun charges ``feeRateBps`` 200 to the taker
-    and nothing to the maker, so ``binary_fee_model(0.0, 0.02)`` is the exchange's schedule.
+    The same fixed settings as ``BacktestAssetPoly``; ``binary_fee_model`` uses the ``linear``
+    fee curve (``min(price, 1 - price)``). Data, latency, and fee rates remain configurable
+    through the normal BacktestAsset chain methods; Predict.fun charges ``feeRateBps`` 200 to
+    the taker and nothing to the maker, so ``binary_fee_model(0.0, 0.02)`` is the exchange's
+    schedule.
     """
 
     FEE_CURVE = 'linear'
@@ -254,8 +254,8 @@ class BacktestAssetPredictFun(BacktestAsset):
         super().__init__()
         self.linear_asset(1.0)
         self.risk_adverse_queue_model()
-        self.tick_size(0.01)
-        self.lot_size(0.01)
+        self.tick_size(0.001)
+        self.lot_size(0.001)
         self.last_trades_capacity(0)
         self.roi_lb(0.0)
         self.roi_ub(1.0)

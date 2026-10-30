@@ -478,12 +478,13 @@ class LinearAssetRecord(Record):
                 )
 
 
-class PolyAssetRecord(LinearAssetRecord):
+class BinaryAssetRecord(LinearAssetRecord):
     """
-    Polymarket record helper.
+    Record helper for binary outcome contracts (Polymarket, Predict.fun, ...): prices in
+    [0, 1] that settle at 0 or 1.
 
-    It applies Polymarket settlement price handling and otherwise behaves like
-    LinearAssetRecord.
+    It settles the record's last price (``fix_record_prices``: above 0.5 to 1, below to 0)
+    and otherwise behaves like LinearAssetRecord.
     """
 
     def __init__(
@@ -493,6 +494,10 @@ class PolyAssetRecord(LinearAssetRecord):
     ):
         self.record_arr = fix_record_prices(record_arr.copy(), settlement=settlement)
         super().__init__(self.record_arr)
+
+
+#: The name ``BinaryAssetRecord`` had before Predict.fun support; the same class.
+PolyAssetRecord = BinaryAssetRecord
 
 
 class InverseAssetRecord(Record):

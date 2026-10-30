@@ -256,3 +256,9 @@ REST API, ``GET /v1/markets/{id}``):
    l2_df = l2_df[l2_df["timestamp"] >= "2026-10-01 00:05"]
    data = predict_fun_to_hbt(l2_df, settle_price=1.0)  # the first outcome (Up) won
    asset = BacktestAssetPredictFun().data(data).binary_fee_model(0.0, 0.02)  # taker 2%, maker 0
+
+``predict_fun_to_hbt(l2_df, trade_df=None, settle_price=None)`` has the shape of
+``polymarket_to_hbt``: there is no Predict.fun trade data (passing ``trade_df`` warns), and
+``settle_price`` must be given because the Predict.fun L2 data carries no resolution (Polymarket's
+does, so there it is optional). ``BinaryAssetRecord`` (``PolyAssetRecord`` is the same class)
+computes the stats for both.

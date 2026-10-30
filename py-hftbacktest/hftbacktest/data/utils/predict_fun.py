@@ -7,6 +7,7 @@ its size while only the best-price pointer moves, and a later clear-from-best mi
 Predict.fun has no public trade channel, so there are no trade events.
 """
 
+import warnings
 from typing import Any
 
 import numpy as np
@@ -15,9 +16,11 @@ from numpy.typing import NDArray
 
 from ...types import BUY_EVENT, DEPTH_EVENT, SELL_EVENT, event_dtype
 from ..validation import correct_event_order
-from .polymarket import _local_ts_ns_expr, _ts_ns_expr
+from .polymarket import _local_ts_ns_expr, _ts_ns_expr, check_settle_price
 
-PREDICT_FUN_TICK_SIZE = 0.01
+# The grid on which two books' levels are matched (prices are quoted on a coarser one); it is
+# an internal key, not the asset's tick size.
+LEVEL_GRID = 0.001
 SETTLE_TS_OFFSET_NS = 1_000_000
 # The book appended at settlement: mid above 0.5 when the first outcome won, below when it
 # lost, so ``PolyAssetRecord`` (``fix_record_prices``) settles the position at exactly 1 or 0.
@@ -27,13 +30,13 @@ SETTLE_BOOKS = {
 }
 
 
-def _levels(prices: Any, sizes: Any, tick_size: float) -> dict[int, float]:
-    """A side as ``tick -> size`` (empty levels dropped)."""
+def _levels(prices: Any, sizes: Any) -> dict[int, float]:
+    """A side as ``grid step -> size`` (empty levels dropped)."""
     prices = np.asarray([] if prices is None else prices, dtype=np.float64)
     sizes = np.asarray([] if sizes is None else sizes, dtype=np.float64)
     n = min(len(prices), len(sizes))
-    ticks = np.rint(prices[:n] / tick_size).astype(np.int64)
-    return {int(t): float(q) for t, q in zip(ticks, sizes[:n]) if q > 0.0}
+    steps = np.rint(prices[:n] / LEVEL_GRID).astype(np.int64)
+    return {int(t): float(q) for t, q in zip(steps, sizes[:n]) if q > 0.0}
 
 
 def _delta_events(
@@ -42,7 +45,6 @@ def _delta_events(
     side: int,
     previous: dict[int, float],
     current: dict[int, float],
-    tick_size: float,
 ) -> NDArray:
     """The depth events that turn ``previous`` into ``current``: removed and shrunk levels
     first, then new and grown ones, so the simulated book never crosses on the way."""
@@ -52,7 +54,7 @@ def _delta_events(
     out = np.zeros(len(changes), dtype=event_dtype)
     if changes:
         out["ev"] = DEPTH_EVENT | side
-        out["px"] = np.asarray([t * tick_size for t, _ in changes])
+        out["px"] = np.asarray([t * LEVEL_GRID for t, _ in changes])
         out["qty"] = np.asarray([q for _, q in changes])
         out["exch_ts"] = ts
         out["local_ts"] = local_ts
@@ -74,24 +76,32 @@ def normalize_predict_fun_l2(l2_df: Any) -> pl.DataFrame:
 
 def predict_fun_to_hbt(
     l2_df: Any,
+    trade_df: Any | None = None,
     settle_price: float | None = None,
-    tick_size: float = PREDICT_FUN_TICK_SIZE,
 ) -> NDArray:
     r"""
-    Converts Predict.fun L2 books into an HftBacktest event array. Every row is a complete
-    book, so the replay starts at the first row given: slice ``l2_df`` to choose where.
+    Converts Predict.fun L2 books into an HftBacktest event array; the counterpart of
+    ``polymarket_to_hbt``. Every row is a complete book, so the replay starts at the first row
+    given: slice ``l2_df`` to choose where.
 
     Args:
         l2_df: DataFrame of pmdata ``predict_fun/l2`` rows: ``timestamp``, ``local_timestamp``,
                ``bid_prices``, ``bid_sizes``, ``ask_prices``, ``ask_sizes`` (any number of
                days; ``market_id``, ``event_type`` and ``order_count`` are ignored).
-        settle_price: 1.0 when the first outcome won, 0.0 when it lost; a settlement book is
-                      then appended 1 ms after the last book so the position settles. ``None``
-                      appends nothing.
-        tick_size: The market's price tick (``decimalPrecision`` 2 on crypto Up/Down markets).
+        trade_df: Not implemented: Predict.fun has no public trade channel, so there is no
+                  trade data to convert. Passing one warns and ignores it.
+        settle_price: 1.0 when the first outcome won, 0.0 when it lost: a settlement book is
+                      appended 1 ms after the last book so the position settles. ``None``
+                      appends nothing (the Predict.fun L2 data carries no resolution; it is in
+                      pmdata's lifecycle data or the Predict.fun API).
     """
-    if settle_price is not None and settle_price not in SETTLE_BOOKS:
-        raise ValueError(f"settle_price must be 0.0 or 1.0, got {settle_price!r}")
+    if trade_df is not None:
+        warnings.warn(
+            "predict_fun_to_hbt: trade_df is not implemented (Predict.fun has no public trade "
+            "channel) and is ignored",
+            stacklevel=2,
+        )
+    check_settle_price(settle_price)
     df = normalize_predict_fun_l2(l2_df)
     if df.is_empty():
         return np.zeros(0, dtype=event_dtype)
@@ -102,10 +112,10 @@ def predict_fun_to_hbt(
 
     def book(ts: int, local_ts: int, bid_prices, bid_sizes, ask_prices, ask_sizes) -> None:
         nonlocal bids, asks
-        new_bids = _levels(bid_prices, bid_sizes, tick_size)
-        new_asks = _levels(ask_prices, ask_sizes, tick_size)
-        parts.append(_delta_events(ts, local_ts, BUY_EVENT, bids, new_bids, tick_size))
-        parts.append(_delta_events(ts, local_ts, SELL_EVENT, asks, new_asks, tick_size))
+        new_bids = _levels(bid_prices, bid_sizes)
+        new_asks = _levels(ask_prices, ask_sizes)
+        parts.append(_delta_events(ts, local_ts, BUY_EVENT, bids, new_bids))
+        parts.append(_delta_events(ts, local_ts, SELL_EVENT, asks, new_asks))
         bids, asks = new_bids, new_asks
 
     rows = zip(

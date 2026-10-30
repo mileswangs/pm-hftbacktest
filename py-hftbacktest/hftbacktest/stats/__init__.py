@@ -2,6 +2,7 @@ from .stats import (
     Stats,
     InverseAssetRecord,
     LinearAssetRecord,
+    BinaryAssetRecord,
     PolyAssetRecord,
     fix_record_prices
 )
@@ -30,6 +31,7 @@ __all__ = (
     'Stats',
     'InverseAssetRecord',
     'LinearAssetRecord',
+    'BinaryAssetRecord',
     'PolyAssetRecord',
     'fix_record_prices',
 

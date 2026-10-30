@@ -15,7 +15,7 @@ from hftbacktest import (
     DEPTH_EVENT, DEPTH_CLEAR_EVENT, DEPTH_SNAPSHOT_EVENT, BUY_EVENT, SELL_EVENT,
     EXCH_EVENT, LOCAL_EVENT, TRADE_EVENT, polymarket_to_hbt, predict_fun_to_hbt
 )
-from hftbacktest.stats import PolyAssetRecord, fix_record_prices
+from hftbacktest.stats import BinaryAssetRecord, PolyAssetRecord, fix_record_prices
 from hftbacktest.types import event_dtype
 
 
@@ -225,13 +225,16 @@ class TestPyHftBacktest(unittest.TestCase):
         self.assertEqual(len(predict_fun_to_hbt(l2.head(0))), 0)
         with self.assertRaises(ValueError):
             predict_fun_to_hbt(l2, settle_price=0.5)
+        with self.assertWarns(UserWarning):
+            self.assertEqual(len(predict_fun_to_hbt(l2, trade_df=l2.head(0))), 4 + 6)
+        self.assertIs(PolyAssetRecord, BinaryAssetRecord)
 
         def sim_book(hbt):
             depth = hbt.depth(0)
-            ticks = range(101)
+            ticks = range(1001)
             return (
-                {round(t * 0.01, 2): depth.bid_qty_at_tick(t) for t in ticks if depth.bid_qty_at_tick(t) > 0},
-                {round(t * 0.01, 2): depth.ask_qty_at_tick(t) for t in ticks if depth.ask_qty_at_tick(t) > 0},
+                {round(t * 0.001, 3): depth.bid_qty_at_tick(t) for t in ticks if depth.bid_qty_at_tick(t) > 0},
+                {round(t * 0.001, 3): depth.ask_qty_at_tick(t) for t in ticks if depth.ask_qty_at_tick(t) > 0},
             )
 
         # Replay the books (with a later one so the data outlasts the clock): the stale 0.49 /
