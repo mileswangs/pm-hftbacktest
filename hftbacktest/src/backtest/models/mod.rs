@@ -10,6 +10,7 @@ mod queue;
 pub use fee::{
     BinaryFeeModel,
     CommonFees,
+    FeeCurve,
     DirectionalFees,
     FeeModel,
     FlatPerTradeFeeModel,

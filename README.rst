@@ -23,7 +23,8 @@ Key Features
 
 * Tick-level Polymarket backtesting
 * Fast execution with `Numba <https://numba.pydata.org/>`_ JIT and Rust
-* Built-in Polymarket fee model
+* Built-in Polymarket and Predict.fun fee models
+* Predict.fun order books (``predict_fun_to_hbt``, ``BacktestAssetPredictFun``)
 * Configurable queue position and latency models
 * **Free** Polymarket tick data from `pmdata.dev <https://pmdata.dev/>`_
 * Built for strategy research and exchange execution simulation
@@ -218,3 +219,42 @@ Example
    stats = PolyAssetRecord(recorder.get(0)).resample("1s").stats(book_size=BOOK_SIZE)
    print(f"earn: {stats.earn}")
    stats.plot()
+
+Fee curves
+----------
+
+``binary_fee_model(maker_fee_rate, taker_fee_rate, fee_curve="auto")`` charges
+``quantity * rate * weight(price)`` on every fill. The weight is the fee curve, which ``"auto"``
+takes from the preset:
+
+* ``BacktestAssetPoly``: ``quadratic``, ``price * (1 - price)`` (Polymarket)
+* ``BacktestAssetPredictFun``: ``linear``, ``min(price, 1 - price)`` (Predict.fun)
+
+Pass ``fee_curve="linear"`` or ``"quadratic"`` to override it.
+
+Predict.fun
+===========
+
+pmdata.dev also records Predict.fun (``predict_fun/l2``: one complete book per row, priced in
+the market's first outcome, no public trade channel). ``predict_fun_to_hbt`` turns the books
+into depth deltas and appends the settlement book once you know the winner (the Predict.fun
+REST API, ``GET /v1/markets/{id}``):
+
+.. code-block:: python
+
+   from hftbacktest import BacktestAssetPredictFun, predict_fun_to_hbt
+
+   market_id = 2792904  # btc-updown-5m-1790813400 (the pmdata markets catalog maps slugs to ids)
+   l2_df = pd.concat(
+       pd.read_parquet(
+           f"https://api.pmdata.dev/v1/predict_fun/l2/{day}/{market_id}.parquet",
+           storage_options=storage_options,
+       )
+       for day in ("2026/09/30", "2026/10/01")  # a market is created the day before its slot
+   )
+   data = predict_fun_to_hbt(
+       l2_df,
+       settle_price=1.0,  # the first outcome (Up) won
+       start=datetime(2026, 10, 1, 0, 5),  # replay from 5 minutes before the slot
+   )
+   asset = BacktestAssetPredictFun().data(data).binary_fee_model(0.0, 0.02)  # taker 2%, maker 0

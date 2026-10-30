@@ -33,6 +33,7 @@ from .order import (
 )
 from .recorder import Recorder
 from .data.utils.polymarket import polymarket_to_hbt
+from .data.utils.predict_fun import predict_fun_to_hbt
 from .types import (
     ALL_ASSETS,
     EVENT_ARRAY,
@@ -68,6 +69,7 @@ except:
 __all__ = (
     'BacktestAsset',
     'BacktestAssetPoly',
+    'BacktestAssetPredictFun',
     'init_orderbook',
     'HashMapMarketDepthBacktest',
     'ROIVectorMarketDepthBacktest',
@@ -114,14 +116,35 @@ __all__ = (
     'MARKET',
 
     'polymarket_to_hbt',
+    'predict_fun_to_hbt',
 
     'Recorder'
 )
 
-__version__ = '1.0.11'
+__version__ = '1.0.12'
 
 
 class BacktestAsset(BacktestAsset_):
+    #: The fee curve ``binary_fee_model(fee_curve='auto')`` uses: ``'quadratic'`` for
+    #: ``price * (1 - price)``, ``'linear'`` for ``min(price, 1 - price)``. Presets set it.
+    FEE_CURVE = 'quadratic'
+
+    def binary_fee_model(self, maker_fee_rate: float, taker_fee_rate: float, fee_curve: str = 'auto'):
+        """
+        Uses ``BinaryFeeModel`` for binary outcome contracts: every fill costs
+        ``quantity * fee_rate * weight(price)``. A negative fee rate represents rebates.
+
+        Args:
+            maker_fee_rate: fee rate of maker fills.
+            taker_fee_rate: fee rate of taker fills.
+            fee_curve: the weight's shape: ``'quadratic'`` for ``price * (1 - price)``
+                       (Polymarket), ``'linear'`` for ``min(price, 1 - price)`` (Predict.fun),
+                       or ``'auto'`` (default) for the asset preset's curve, ``FEE_CURVE``.
+        """
+        curve = self.FEE_CURVE if fee_curve == 'auto' else fee_curve
+        super().binary_fee_model(maker_fee_rate, taker_fee_rate, curve)
+        return self
+
     def add_data(self, data: EVENT_ARRAY):
         self._add_data_ndarray(data.ctypes.data, len(data))
         return self
@@ -196,10 +219,12 @@ class BacktestAssetPoly(BacktestAsset):
     """
     BacktestAsset preset for Polymarket data.
 
-    The Polymarket-specific fixed settings are applied at construction time.
-    Data, latency, and fee model remain configurable through the normal
-    BacktestAsset chain methods.
+    The Polymarket-specific fixed settings are applied at construction time; ``binary_fee_model``
+    uses the ``quadratic`` fee curve (``price * (1 - price)``). Data, latency, and fee rates
+    remain configurable through the normal BacktestAsset chain methods.
     """
+
+    FEE_CURVE = 'quadratic'
 
     def __init__(self):
         super().__init__()
@@ -207,6 +232,30 @@ class BacktestAssetPoly(BacktestAsset):
         self.risk_adverse_queue_model()
         self.tick_size(0.001)
         self.lot_size(0.001)
+        self.last_trades_capacity(0)
+        self.roi_lb(0.0)
+        self.roi_ub(1.0)
+
+
+class BacktestAssetPredictFun(BacktestAsset):
+    """
+    BacktestAsset preset for Predict.fun data (``predict_fun_to_hbt``).
+
+    The Predict.fun-specific fixed settings are applied at construction time: a 0.01 tick
+    (``decimalPrecision`` 2) and prices in [0, 1]; ``binary_fee_model`` uses the ``linear`` fee
+    curve (``min(price, 1 - price)``). Data, latency, and fee rates remain configurable through
+    the normal BacktestAsset chain methods; Predict.fun charges ``feeRateBps`` 200 to the taker
+    and nothing to the maker, so ``binary_fee_model(0.0, 0.02)`` is the exchange's schedule.
+    """
+
+    FEE_CURVE = 'linear'
+
+    def __init__(self):
+        super().__init__()
+        self.linear_asset(1.0)
+        self.risk_adverse_queue_model()
+        self.tick_size(0.01)
+        self.lot_size(0.01)
         self.last_trades_capacity(0)
         self.roi_lb(0.0)
         self.roi_ub(1.0)

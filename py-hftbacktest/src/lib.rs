@@ -15,6 +15,7 @@ use hftbacktest::{
         models::{
             BinaryFeeModel,
             CommonFees,
+            FeeCurve,
             ConstantLatency,
             FlatPerTradeFeeModel,
             IntpOrderLatency,
@@ -103,7 +104,7 @@ pub enum FeeModel {
     TradingValueFeeModel { fees: CommonFees },
     TradingQtyFeeModel { fees: CommonFees },
     FlatPerTradeFeeModel { fees: CommonFees },
-    BinaryFeeModel { fees: CommonFees },
+    BinaryFeeModel { fees: CommonFees, curve: FeeCurve },
 }
 
 /// Builds a backtesting asset.
@@ -495,17 +496,32 @@ impl BacktestAsset {
 
     /// Uses `BinaryFeeModel` for binary outcome contracts.
     ///
-    /// The fee amount is `quantity * fee_rate * price * (1 - price)`, calculated from each fill's
-    /// execution quantity and execution price. A negative fee rate represents rebates.
-    pub fn binary_fee_model(
-        mut slf: PyRefMut<Self>,
+    /// The fee amount is `quantity * fee_rate * weight(price)`, calculated from each fill's
+    /// execution quantity and execution price. The weight is the fee curve:
+    /// `price * (1 - price)` on the `quadratic` curve (Polymarket), `min(price, 1 - price)` on
+    /// the `linear` one (Predict.fun). The Python asset presets pass their exchange's curve. A
+    /// negative fee rate represents rebates.
+    #[pyo3(signature = (maker_fee_rate, taker_fee_rate, fee_curve = "quadratic"))]
+    pub fn binary_fee_model<'py>(
+        mut slf: PyRefMut<'py, Self>,
         maker_fee_rate: f64,
         taker_fee_rate: f64,
-    ) -> PyRefMut<Self> {
+        fee_curve: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let curve = match fee_curve {
+            "quadratic" => FeeCurve::Quadratic,
+            "linear" => FeeCurve::Linear,
+            other => {
+                return Err(PyErr::new::<PyValueError, _>(format!(
+                    "fee_curve must be 'quadratic' or 'linear', got '{other}'"
+                )));
+            }
+        };
         slf.fee_model = FeeModel::BinaryFeeModel {
             fees: CommonFees::new(maker_fee_rate, taker_fee_rate),
+            curve,
         };
-        slf
+        Ok(slf)
     }
 }
 
@@ -573,7 +589,7 @@ pub fn build_hashmap_backtest(assets: Vec<PyRefMut<BacktestAsset>>) -> PyResult<
                 TradingValueFeeModel { fees },
                 TradingQtyFeeModel { fees },
                 FlatPerTradeFeeModel { fees },
-                BinaryFeeModel { fees },
+                BinaryFeeModel { fees, curve },
             ]
         );
         local.push(asst.local);
@@ -631,7 +647,7 @@ pub fn build_roivec_backtest(assets: Vec<PyRefMut<BacktestAsset>>) -> PyResult<u
                 TradingValueFeeModel { fees },
                 TradingQtyFeeModel { fees },
                 FlatPerTradeFeeModel { fees },
-                BinaryFeeModel { fees },
+                BinaryFeeModel { fees, curve },
             ]
         );
         local.push(asst.local);

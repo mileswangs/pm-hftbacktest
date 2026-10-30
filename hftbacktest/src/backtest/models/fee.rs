@@ -131,26 +131,48 @@ impl FeeModel for TradingQtyFeeModel<DirectionalFees> {
     }
 }
 
+/// How a binary outcome contract's fee varies with the execution price: the weight that
+/// multiplies `quantity * fee_rate`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum FeeCurve {
+    /// `price * (1 - price)`, a parabola peaking at 0.25 (Polymarket).
+    #[default]
+    Quadratic,
+    /// `min(price, 1 - price)`, a triangle peaking at 0.5 (Predict.fun).
+    Linear,
+}
+
+impl FeeCurve {
+    /// The price weight of the fee at `price`.
+    #[inline]
+    pub fn weight(&self, price: f64) -> f64 {
+        match self {
+            FeeCurve::Quadratic => price * (1.0 - price),
+            FeeCurve::Linear => price.min(1.0 - price),
+        }
+    }
+}
+
 /// Fee for binary outcome contracts, based on the execution quantity and price.
 ///
-/// The amount is `quantity * fee_rate * price * (1 - price)`, with the rate depending on whether
-/// the order is a maker or taker.
+/// The amount is `quantity * fee_rate * weight(price)`, with the rate depending on whether the
+/// order is a maker or taker and the weight given by the [`FeeCurve`].
 #[derive(Clone)]
 pub struct BinaryFeeModel<Fees> {
     fees: Fees,
+    curve: FeeCurve,
 }
 
 impl<Fees> BinaryFeeModel<Fees> {
     /// Constructs `BinaryFeeModel`.
-    pub fn new(fees: Fees) -> Self {
-        Self { fees }
+    pub fn new(fees: Fees, curve: FeeCurve) -> Self {
+        Self { fees, curve }
     }
 }
 
 impl FeeModel for BinaryFeeModel<CommonFees> {
     fn amount(&self, order: &Order, _amount: f64) -> f64 {
-        let price = order.exec_price();
-        self.fees.select(order.maker) * order.exec_qty * price * (1.0 - price)
+        self.fees.select(order.maker) * order.exec_qty * self.curve.weight(order.exec_price())
     }
 }
 
@@ -174,7 +196,7 @@ impl FeeModel for FlatPerTradeFeeModel<CommonFees> {
 
 #[cfg(test)]
 mod tests {
-    use super::{BinaryFeeModel, CommonFees, FeeModel};
+    use super::{BinaryFeeModel, CommonFees, FeeCurve, FeeModel};
     use crate::prelude::{OrdType, Order, Side, TimeInForce};
 
     fn executed_order(price: f64, qty: f64, maker: bool) -> Order {
@@ -203,7 +225,7 @@ mod tests {
 
     #[test]
     fn binary_fee_uses_execution_quantity_and_price() {
-        let model = BinaryFeeModel::new(CommonFees::new(0.01, 0.02));
+        let model = BinaryFeeModel::new(CommonFees::new(0.01, 0.02), FeeCurve::Quadratic);
         let order = executed_order(0.4, 100.0, false);
 
         assert_close(model.amount(&order, 999_999.0), 0.48);
@@ -211,7 +233,7 @@ mod tests {
 
     #[test]
     fn binary_fee_selects_maker_or_taker_rate() {
-        let model = BinaryFeeModel::new(CommonFees::new(-0.01, 0.02));
+        let model = BinaryFeeModel::new(CommonFees::new(-0.01, 0.02), FeeCurve::Quadratic);
         let maker_order = executed_order(0.5, 100.0, true);
         let taker_order = executed_order(0.5, 100.0, false);
 
@@ -221,7 +243,7 @@ mod tests {
 
     #[test]
     fn binary_fee_is_symmetric_around_half() {
-        let model = BinaryFeeModel::new(CommonFees::new(0.0, 0.02));
+        let model = BinaryFeeModel::new(CommonFees::new(0.0, 0.02), FeeCurve::Quadratic);
         let low_price_order = executed_order(0.2, 100.0, false);
         let high_price_order = executed_order(0.8, 100.0, false);
 
@@ -233,11 +255,32 @@ mod tests {
 
     #[test]
     fn binary_fee_is_zero_at_binary_price_boundaries() {
-        let model = BinaryFeeModel::new(CommonFees::new(0.01, 0.02));
+        let model = BinaryFeeModel::new(CommonFees::new(0.01, 0.02), FeeCurve::Quadratic);
         let zero_price_order = executed_order(0.0, 100.0, false);
         let one_price_order = executed_order(1.0, 100.0, false);
 
         assert_close(model.amount(&zero_price_order, 0.0), 0.0);
         assert_close(model.amount(&one_price_order, 0.0), 0.0);
+    }
+
+    #[test]
+    fn linear_fee_curve_uses_the_cheaper_side() {
+        let model = BinaryFeeModel::new(CommonFees::new(0.0, 0.02), FeeCurve::Linear);
+        let low_price_order = executed_order(0.2, 100.0, false);
+        let high_price_order = executed_order(0.8, 100.0, false);
+        let mid_price_order = executed_order(0.5, 100.0, false);
+
+        assert_close(model.amount(&low_price_order, 0.0), 0.4);
+        assert_close(model.amount(&high_price_order, 0.0), 0.4);
+        assert_close(model.amount(&mid_price_order, 0.0), 1.0);
+    }
+
+    #[test]
+    fn fee_curves_agree_at_the_boundaries_and_differ_at_half() {
+        assert_close(FeeCurve::Quadratic.weight(0.0), FeeCurve::Linear.weight(0.0));
+        assert_close(FeeCurve::Quadratic.weight(1.0), FeeCurve::Linear.weight(1.0));
+        assert_close(FeeCurve::Quadratic.weight(0.5), 0.25);
+        assert_close(FeeCurve::Linear.weight(0.5), 0.5);
+        assert_eq!(FeeCurve::default(), FeeCurve::Quadratic);
     }
 }
