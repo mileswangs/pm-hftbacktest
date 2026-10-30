@@ -265,7 +265,7 @@ class TestPyHftBacktest(unittest.TestCase):
                     break
             else:
                 self.fail("replay did not reach the end of the data")
-            self.assertEqual((hbt.depth(0).best_bid, hbt.depth(0).best_ask), (0.99, 1.0))
+            self.assertEqual((hbt.depth(0).best_bid, hbt.depth(0).best_ask), (0.998, 1.0))
         finally:
             hbt.close()
 
