@@ -224,7 +224,10 @@ class TestPyHftBacktest(unittest.TestCase):
         self.assertTrue((settled['local_ts'] >= settled['exch_ts']).all())
         self.assertEqual(len(predict_fun_to_hbt(l2.head(0))), 0)
         with self.assertRaises(ValueError):
-            predict_fun_to_hbt(l2, settle_price=0.5)
+            predict_fun_to_hbt(l2, settle_price=0.7)
+        tie = predict_fun_to_hbt(l2, settle_price=0.5)
+        self.assertEqual(len(tie), 4 + 6 + 4)
+        self.assertEqual(sorted(tie['px'][-4:]), [0.499, 0.501, 0.84, 0.85])
         with self.assertWarns(UserWarning):
             self.assertEqual(len(predict_fun_to_hbt(l2, trade_df=l2.head(0))), 4 + 6)
         self.assertIs(PolyAssetRecord, BinaryAssetRecord)
@@ -333,6 +336,31 @@ class TestPyHftBacktest(unittest.TestCase):
         self.assertEqual(bid_snapshots['qty'][0], 0.01)
         self.assertEqual(ask_snapshots['px'][0], 1.0)
         self.assertEqual(ask_snapshots['qty'][0], 0.01)
+
+    def test_polymarket_to_hbt_takes_an_explicit_settle_price(self):
+        l2 = pl.DataFrame(
+            {
+                'timestamp': [1_000, 2_000],
+                'local_timestamp': [1_100, 2_100],
+                'event_type': ['book', 'book'],
+                'bid_prices': [[0.49], [0.49]],
+                'bid_sizes': [[10.0], [10.0]],
+                'ask_prices': [[0.51], [0.51]],
+                'ask_sizes': [[10.0], [10.0]],
+                'pc_price': pl.Series([None, None], dtype=pl.Float64),
+                'pc_size': pl.Series([None, None], dtype=pl.Float64),
+                'pc_side': pl.Series([None, None], dtype=pl.String),
+            }
+        )
+        for settle_price, best in ((1.0, (0.998, 1.0)), (0.5, (0.499, 0.501)), (0.0, (0.001, 0.003))):
+            with self.subTest(settle_price=settle_price):
+                data = polymarket_to_hbt(l2, settle_price=settle_price)
+                last_bid = [e for e in data if e['ev'] & BUY_EVENT and e['ev'] & EXCH_EVENT][-1]
+                last_ask = [e for e in data if e['ev'] & SELL_EVENT and e['ev'] & EXCH_EVENT][-1]
+                self.assertEqual((float(last_bid['px']), float(last_ask['px'])), best)
+        self.assertEqual(len(polymarket_to_hbt(l2)), len(polymarket_to_hbt(l2, settle_price=1.0)) - 4)
+        with self.assertRaises(ValueError):
+            polymarket_to_hbt(l2, settle_price=0.7)
 
     def test_polymarket_to_hbt_clears_empty_snapshot_sides(self):
         data = polymarket_to_hbt(

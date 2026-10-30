@@ -259,6 +259,7 @@ REST API, ``GET /v1/markets/{id}``):
 
 ``predict_fun_to_hbt(l2_df, trade_df=None, settle_price=None)`` has the shape of
 ``polymarket_to_hbt``: there is no Predict.fun trade data (passing ``trade_df`` warns), and
-``settle_price`` must be given because the Predict.fun L2 data carries no resolution (Polymarket's
-does, so there it is optional). ``BinaryAssetRecord`` (``PolyAssetRecord`` is the same class)
+``settle_price`` (1, 0, or 0.5 for a tie) must be given because the Predict.fun L2 data carries no
+resolution (Polymarket's does, so there it is optional; without one the stats settle by the last
+price). ``BinaryAssetRecord`` (``PolyAssetRecord`` is the same class)
 computes the stats for both.

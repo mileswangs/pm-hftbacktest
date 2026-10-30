@@ -132,32 +132,39 @@ def resolved_settle_price(df: pl.DataFrame) -> float | None:
     return _settle_price_from_winning_outcome(resolved.tail(1).to_dicts()[0]["winning_outcome"])
 
 
+# The book appended at settlement for each settlement price: (bid prices, bid sizes, ask prices,
+# ask sizes). Its mid is above 0.5 for a Yes win, below for a No win and exactly 0.5 for a tie,
+# which is what ``fix_record_prices`` settles the record's last price by.
+SETTLE_BOOKS = {
+    1.0: ([0.998], [0.01], [1.0], [0.01]),
+    0.5: ([0.499], [0.01], [0.501], [0.01]),
+    0.0: ([0.001], [0.01], [0.003], [0.01]),
+}
+
+
 def check_settle_price(settle_price: float | None) -> float | None:
-    if settle_price is not None and settle_price not in (0.0, 1.0):
-        raise ValueError(f"settle_price must be 0.0 or 1.0, got {settle_price!r}")
+    """``None`` (no settlement given), or 1.0 (Yes won), 0.0 (No won), 0.5 (a tie, settled
+    half each)."""
+    if settle_price is not None and settle_price not in SETTLE_BOOKS:
+        raise ValueError(f"settle_price must be 0.0, 0.5 or 1.0, got {settle_price!r}")
     return settle_price
 
 
 def _append_settle_book(df: pl.DataFrame, settle_price: float | None) -> pl.DataFrame:
-    """Appends the settlement book at the data's last timestamp: a Yes win trades just below
-    1, a No win just above 0, so the record's last price settles the position."""
+    """Appends the settlement book at the data's last timestamp so the record's last price
+    settles the position (``SETTLE_BOOKS``)."""
     if settle_price is None:
         return df
 
+    bid_prices, bid_sizes, ask_prices, ask_sizes = SETTLE_BOOKS[settle_price]
     book = {col: None for col in df.columns}
     book["timestamp"] = df.select(pl.col("timestamp").max()).item()
     book["local_timestamp"] = df.select(pl.col("local_timestamp").max()).item()
     book["event_type"] = "book"
-    if settle_price == 1.0:
-        book["bid_prices"] = [0.998]
-        book["bid_sizes"] = [0.01]
-        book["ask_prices"] = [1.0]
-        book["ask_sizes"] = [0.01]
-    else:
-        book["bid_prices"] = [0.001]
-        book["bid_sizes"] = [0.01]
-        book["ask_prices"] = [0.003]
-        book["ask_sizes"] = [0.01]
+    book["bid_prices"] = bid_prices
+    book["bid_sizes"] = bid_sizes
+    book["ask_prices"] = ask_prices
+    book["ask_sizes"] = ask_sizes
 
     return pl.concat([df, pl.DataFrame([book], schema=df.schema)], how="vertical")
 
@@ -247,10 +254,10 @@ def polymarket_to_hbt(
         trade_df: Optional DataFrame containing Polymarket trade data. Expected
                   columns are timestamp, local_timestamp, outcome, price, size,
                   and side. market_slug and event_type are ignored.
-        settle_price: 1.0 when Yes won, 0.0 when No won: a settlement book is appended at the
-                      data's last timestamp so the position settles. ``None`` (default) takes
-                      it from the data's ``market_resolved`` row, appending nothing when there
-                      is none.
+        settle_price: 1.0 when Yes won, 0.0 when No won, 0.5 for a tie: a settlement book is
+                      appended at the data's last timestamp so the position settles. ``None``
+                      (default) takes it from the data's ``market_resolved`` row, appending
+                      nothing when there is none (the stats then settle by the last price).
     """
     l2_df = pl.DataFrame(l2_df)
     if check_settle_price(settle_price) is None:

@@ -23,10 +23,12 @@ from .polymarket import _local_ts_ns_expr, _ts_ns_expr, check_settle_price
 LEVEL_GRID = 0.001
 SETTLE_TS_OFFSET_NS = 1_000_000
 # The book appended at settlement: mid above 0.5 when the first outcome won, below when it
-# lost, so ``PolyAssetRecord`` (``fix_record_prices``) settles the position at exactly 1 or 0.
+# lost, exactly 0.5 for a tie, so ``BinaryAssetRecord`` (``fix_record_prices``) settles the
+# position at 1, 0 or 0.5.
 SETTLE_BOOKS = {
-    1.0: ([0.99], [0.01], [1.0], [0.01]),
-    0.0: ([0.01], [0.01], [0.02], [0.01]),
+    1.0: ([0.998], [0.01], [1.0], [0.01]),
+    0.5: ([0.499], [0.01], [0.501], [0.01]),
+    0.0: ([0.001], [0.01], [0.003], [0.01]),
 }
 
 
@@ -90,9 +92,11 @@ def predict_fun_to_hbt(
                days; ``market_id``, ``event_type`` and ``order_count`` are ignored).
         trade_df: Not implemented: Predict.fun has no public trade channel, so there is no
                   trade data to convert. Passing one warns and ignores it.
-        settle_price: 1.0 when the first outcome won, 0.0 when it lost: a settlement book is
-                      appended 1 ms after the last book so the position settles. ``None``
-                      appends nothing (the Predict.fun L2 data carries no resolution; it is in
+        settle_price: 1.0 when the first outcome won, 0.0 when it lost, 0.5 for a tie (a
+                      crypto Up/Down market whose start and end prices are equal settles half
+                      each): a settlement book is appended 1 ms after the last book so the
+                      position settles. ``None`` appends nothing and the stats settle by the
+                      last price (the Predict.fun L2 data carries no resolution; it is in
                       pmdata's lifecycle data or the Predict.fun API).
     """
     if trade_df is not None:
