@@ -202,23 +202,25 @@ class TestPyHftBacktest(unittest.TestCase):
             'ask_sizes': pl.List(pl.Float64),
             'order_count': pl.Int64,
         }
-        stale = book(t0_us - 600_000_000, [(0.5, 1.0)], [(0.51, 1.0)])
-        opening = book(t0_us - 300_000_000, [(0.49, 10.0), (0.48, 20.0)], [(0.5, 5.0), (0.51, 6.0)])
+        stale = book(t0_us - 600_000, [(0.5, 1.0)], [(0.51, 1.0)])  # microseconds: 600 ms before t0
+        opening = book(t0_us - 300_000, [(0.49, 10.0), (0.48, 20.0)], [(0.5, 5.0), (0.51, 6.0)])
         second = book(t0_us + 1_000_000, [(0.84, 7.0)], [(0.85, 8.0)])
         resent = dict(second, local_timestamp=second['local_timestamp'] + 1_000_000)
         never = dict(book(t0_us + 2_000_000, [], []), timestamp=None)
         l2 = pl.DataFrame([resent, second, never, stale, opening], schema=schema)
 
-        books = predict_fun_to_hbt(l2, start=t0)
-        settled = predict_fun_to_hbt(l2, settle_price=1.0, start=t0)
-        # the opening book re-stamped to start (4 adds), the second book (4 removals + 2
-        # adds), and the settlement 1 ms after it (2 removals + 2 adds)
+        # The caller slices the books (each row is a complete one); from `opening` on: the
+        # opening book (4 adds), the second book (4 removals + 2 adds), and the settlement 1 ms
+        # after it (2 removals + 2 adds). `never` is dropped, `resent` deduplicated.
+        l2 = l2.filter(pl.col('timestamp').is_null() | (pl.col('timestamp') >= opening['timestamp']))
+        books = predict_fun_to_hbt(l2)
+        settled = predict_fun_to_hbt(l2, settle_price=1.0)
         self.assertEqual(len(books), 4 + 6)
         self.assertEqual(len(settled), 4 + 6 + 4)
-        start_ns = t0_us * 1_000
-        self.assertEqual(int(books['exch_ts'][0]), start_ns)
-        self.assertEqual(int(books['local_ts'][0]), start_ns + 100_000_000)
-        self.assertEqual(int(settled['exch_ts'][-1]), start_ns + 1_000_000_000 + 1_000_000)
+        opening_ns = (t0_us - 300_000) * 1_000
+        self.assertEqual(int(books['exch_ts'][0]), opening_ns)
+        self.assertEqual(int(books['local_ts'][0]), opening_ns + 100_000_000)
+        self.assertEqual(int(settled['exch_ts'][-1]), t0_us * 1_000 + 1_000_000_000 + 1_000_000)
         self.assertTrue((settled['local_ts'] >= settled['exch_ts']).all())
         self.assertEqual(len(predict_fun_to_hbt(l2.head(0))), 0)
         with self.assertRaises(ValueError):
@@ -235,14 +237,14 @@ class TestPyHftBacktest(unittest.TestCase):
         # Replay the books (with a later one so the data outlasts the clock): the stale 0.49 /
         # 0.48 levels must be gone once the second book is in.
         later = book(t0_us + 10_000_000, [(0.84, 7.0)], [(0.86, 1.0)])
-        with_later = predict_fun_to_hbt(pl.concat([l2, pl.DataFrame([later], schema=schema)]), start=t0)
+        with_later = predict_fun_to_hbt(pl.concat([l2, pl.DataFrame([later], schema=schema)]))
         hbt = ROIVectorMarketDepthBacktest(
             [BacktestAssetPredictFun().data(with_later).constant_order_latency(1_000_000, 1_000_000)]
         )
         try:
-            self.assertEqual(hbt.elapse(200_000_000), 0)
+            self.assertEqual(hbt.elapse(200_000_000), 0)  # the opening book, 300 ms before t0
             self.assertEqual(sim_book(hbt), ({0.49: 10.0, 0.48: 20.0}, {0.5: 5.0, 0.51: 6.0}))
-            self.assertEqual(hbt.elapse(1_000_000_000), 0)
+            self.assertEqual(hbt.elapse(1_300_000_000), 0)
             self.assertEqual(sim_book(hbt), ({0.84: 7.0}, {0.85: 8.0}))
         finally:
             hbt.close()

@@ -7,7 +7,6 @@ its size while only the best-price pointer moves, and a later clear-from-best mi
 Predict.fun has no public trade channel, so there are no trade events.
 """
 
-from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
@@ -26,16 +25,6 @@ SETTLE_BOOKS = {
     1.0: ([0.99], [0.01], [1.0], [0.01]),
     0.0: ([0.01], [0.01], [0.02], [0.01]),
 }
-
-
-def _to_ns(value: Any) -> int:
-    if isinstance(value, (int, np.integer)):
-        return int(value)
-    if isinstance(value, datetime):
-        if value.tzinfo is not None:
-            value = value.astimezone(timezone.utc).replace(tzinfo=None)
-        return int(np.datetime64(value, "ns").astype(np.int64))
-    return int(np.datetime64(value, "ns").astype(np.int64))
 
 
 def _levels(prices: Any, sizes: Any, tick_size: float) -> dict[int, float]:
@@ -70,43 +59,27 @@ def _delta_events(
     return out
 
 
-def normalize_predict_fun_l2(l2_df: Any, start: Any | None = None) -> pl.DataFrame:
+def normalize_predict_fun_l2(l2_df: Any) -> pl.DataFrame:
     """The books in replay order with ``ts`` / ``local_ts`` in nanoseconds: rows without a
     timestamp dropped (a never-updated empty book), sorted by ``timestamp`` then
     ``local_timestamp``, one row per ``timestamp`` (the book is re-sent on every subscription
-    and can appear in two day files). With ``start`` (UTC datetime or nanoseconds), rows before
-    it are replaced by the last of them, re-stamped to ``start`` with its own receive latency,
-    so the replay opens with a full book."""
+    and can appear in two day files)."""
     df = pl.DataFrame(l2_df).filter(pl.col("timestamp").is_not_null())
     ts_expr = _ts_ns_expr(df)
     df = df.with_columns(ts_expr.alias("ts"), _local_ts_ns_expr(df, ts_expr).alias("local_ts"))
-    df = df.sort(["ts", "local_ts"], maintain_order=True).unique(
+    return df.sort(["ts", "local_ts"], maintain_order=True).unique(
         subset=["ts"], keep="first", maintain_order=True
     )
-    if start is None or df.is_empty():
-        return df
-    start_ns = _to_ns(start)
-    before = df.filter(pl.col("ts") < start_ns)
-    after = df.filter(pl.col("ts") >= start_ns)
-    if before.is_empty():
-        return after
-    opening = before.tail(1)
-    latency = int(opening["local_ts"][0]) - int(opening["ts"][0])
-    opening = opening.with_columns(
-        pl.lit(start_ns, dtype=pl.Int64).alias("ts"),
-        pl.lit(start_ns + latency, dtype=pl.Int64).alias("local_ts"),
-    )
-    return pl.concat([opening, after])
 
 
 def predict_fun_to_hbt(
     l2_df: Any,
     settle_price: float | None = None,
-    start: Any | None = None,
     tick_size: float = PREDICT_FUN_TICK_SIZE,
 ) -> NDArray:
     r"""
-    Converts Predict.fun L2 books into an HftBacktest event array.
+    Converts Predict.fun L2 books into an HftBacktest event array. Every row is a complete
+    book, so the replay starts at the first row given: slice ``l2_df`` to choose where.
 
     Args:
         l2_df: DataFrame of pmdata ``predict_fun/l2`` rows: ``timestamp``, ``local_timestamp``,
@@ -115,12 +88,11 @@ def predict_fun_to_hbt(
         settle_price: 1.0 when the first outcome won, 0.0 when it lost; a settlement book is
                       then appended 1 ms after the last book so the position settles. ``None``
                       appends nothing.
-        start: Keep the books from this UTC time on, opening with the last book before it.
         tick_size: The market's price tick (``decimalPrecision`` 2 on crypto Up/Down markets).
     """
     if settle_price is not None and settle_price not in SETTLE_BOOKS:
         raise ValueError(f"settle_price must be 0.0 or 1.0, got {settle_price!r}")
-    df = normalize_predict_fun_l2(l2_df, start)
+    df = normalize_predict_fun_l2(l2_df)
     if df.is_empty():
         return np.zeros(0, dtype=event_dtype)
 

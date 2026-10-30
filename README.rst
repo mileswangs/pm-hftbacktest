@@ -252,9 +252,7 @@ REST API, ``GET /v1/markets/{id}``):
        )
        for day in ("2026/09/30", "2026/10/01")  # a market is created the day before its slot
    )
-   data = predict_fun_to_hbt(
-       l2_df,
-       settle_price=1.0,  # the first outcome (Up) won
-       start=datetime(2026, 10, 1, 0, 5),  # replay from 5 minutes before the slot
-   )
+   # every row is a complete book, so slice l2_df to choose where the replay starts
+   l2_df = l2_df[l2_df["timestamp"] >= "2026-10-01 00:05"]
+   data = predict_fun_to_hbt(l2_df, settle_price=1.0)  # the first outcome (Up) won
    asset = BacktestAssetPredictFun().data(data).binary_fee_model(0.0, 0.02)  # taker 2%, maker 0

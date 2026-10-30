@@ -9,7 +9,7 @@ readme = "README.rst"
 authors = [{ name = "mileswangs", email = "wangshuosum@gmail.com" }]
 license = { file = "LICENSE" }
 version = "1.0.12"
-requires-python = ">=3.11"
+requires-python = ">=3.11, <3.15"
 dependencies = [
  "numpy >=2.0, <2.3",
  "numba ~= 0.61",
