@@ -40,6 +40,16 @@ def _levels(prices: Any, sizes: Any, grid: float = LEVEL_GRID) -> dict[int, floa
     return {int(t): float(q) for t, q in zip(steps, sizes[:n]) if q > 0.0}
 
 
+def _level_changes(previous: dict, current: dict) -> list[tuple]:
+    """The ``(grid step, new size)`` updates that turn the side ``previous`` into ``current``:
+    removed and shrunk levels first, then new and grown ones, so the simulated book never
+    crosses on the way."""
+    changes = [(t, 0) for t in previous if t not in current]
+    changes += [(t, q) for t, q in current.items() if q < previous.get(t, 0)]
+    changes += [(t, q) for t, q in current.items() if q > previous.get(t, 0)]
+    return changes
+
+
 def _delta_events(
     ts: int,
     local_ts: int,
@@ -48,11 +58,8 @@ def _delta_events(
     current: dict[int, float],
     grid: float = LEVEL_GRID,
 ) -> NDArray:
-    """The depth events that turn ``previous`` into ``current``: removed and shrunk levels
-    first, then new and grown ones, so the simulated book never crosses on the way."""
-    changes = [(t, 0.0) for t in previous if t not in current]
-    changes += [(t, q) for t, q in current.items() if q < previous.get(t, 0.0)]
-    changes += [(t, q) for t, q in current.items() if q > previous.get(t, 0.0)]
+    """The depth events that turn ``previous`` into ``current`` (``_level_changes``)."""
+    changes = _level_changes(previous, current)
     out = np.zeros(len(changes), dtype=event_dtype)
     if changes:
         out["ev"] = DEPTH_EVENT | side

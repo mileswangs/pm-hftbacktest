@@ -5,18 +5,22 @@ import polars as pl
 from numba import njit
 
 from datetime import datetime
+from decimal import Decimal
 
 from hftbacktest import (
     BacktestAsset,
+    BacktestAssetKalshi,
     BacktestAssetPoly,
     BacktestAssetPolyUS,
     BacktestAssetPredictFun,
     HashMapMarketDepthBacktest,
     ALL_ASSETS, ROIVectorMarketDepthBacktest,
     DEPTH_EVENT, DEPTH_CLEAR_EVENT, DEPTH_SNAPSHOT_EVENT, BUY_EVENT, SELL_EVENT,
-    EXCH_EVENT, LOCAL_EVENT, TRADE_EVENT, polymarket_to_hbt, polymarket_us_to_hbt, predict_fun_to_hbt
+    EXCH_EVENT, LOCAL_EVENT, TRADE_EVENT, kalshi_to_hbt, polymarket_to_hbt, polymarket_us_to_hbt,
+    predict_fun_to_hbt
 )
 from hftbacktest.data import correct_local_depth_order
+from hftbacktest.data.utils.kalshi import kalshi_settle_price
 from hftbacktest.stats import BinaryAssetRecord, PolyAssetRecord, fix_record_prices
 from hftbacktest.types import event_dtype
 
@@ -157,6 +161,7 @@ class TestPyHftBacktest(unittest.TestCase):
         cases = [
             (BacktestAssetPoly, 'auto', 0.48),
             (BacktestAssetPolyUS, 'auto', 0.48),
+            (BacktestAssetKalshi, 'auto', 0.48),
             (BacktestAssetPredictFun, 'auto', 0.8),
             (BacktestAssetPoly, 'linear', 0.8),
             (BacktestAssetPredictFun, 'quadratic', 0.48),
@@ -386,6 +391,159 @@ class TestPyHftBacktest(unittest.TestCase):
             self.assertEqual((hbt.depth(0).best_bid, hbt.depth(0).best_ask), (0.001, 0.003))
         finally:
             hbt.close()
+
+    def test_kalshi_to_hbt_replays_snapshots_deltas_and_trades(self):
+        t0 = int(np.datetime64(datetime(2026, 10, 15, 13, 15), 'us').astype(np.int64))
+        ms = 1_000
+
+        def levels(pairs):
+            return [Decimal(p) for p, _ in pairs], [Decimal(s) for _, s in pairs]
+
+        def snapshot(ts, local_ts, yes, no):
+            (yes_prices, yes_sizes), (no_prices, no_sizes) = levels(yes), levels(no)
+            return {
+                'market_ticker': 'KXBTC15M-26OCT150930-30',
+                'timestamp': ts,
+                'local_timestamp': local_ts,
+                'event_type': 'orderbook_snapshot',
+                'yes_prices': yes_prices,
+                'yes_sizes': yes_sizes,
+                'no_prices': no_prices,
+                'no_sizes': no_sizes,
+                'delta_price': None,
+                'delta_size': None,
+                'delta_side': None,
+            }
+
+        def delta(ts, local_ts, side, price, size):
+            return {
+                'market_ticker': 'KXBTC15M-26OCT150930-30',
+                'timestamp': ts,
+                'local_timestamp': local_ts,
+                'event_type': 'orderbook_delta',
+                'yes_prices': None,
+                'yes_sizes': None,
+                'no_prices': None,
+                'no_sizes': None,
+                'delta_price': Decimal(price),
+                'delta_size': Decimal(size),
+                'delta_side': side,
+            }
+
+        decimal = pl.Decimal(18, 4)
+        l2_schema = {
+            'market_ticker': pl.String,
+            'timestamp': pl.Datetime('us'),
+            'local_timestamp': pl.Datetime('us'),
+            'event_type': pl.String,
+            'yes_prices': pl.List(decimal),
+            'yes_sizes': pl.List(decimal),
+            'no_prices': pl.List(decimal),
+            'no_sizes': pl.List(decimal),
+            'delta_price': decimal,
+            'delta_size': decimal,
+            'delta_side': pl.String,
+        }
+        # A book of YES bids and NO bids (a NO bid at 0.46 is a YES ask at 0.54), then deltas:
+        # one empties a level, one adds a size that floats cannot sum exactly, one opens a
+        # sub-cent level, one takes more than the level holds and one finds no level. The
+        # snapshot that follows repeats the book; the market then expires and its day ends.
+        midnight = t0 + 38_700_000 * ms
+        l2 = pl.DataFrame(
+            [
+                snapshot(None, t0 + 40 * ms, [('0.53', '10'), ('0.52', '20')], [('0.46', '5'), ('0.45', '6')]),
+                delta(t0 + 10 * ms, t0 + 41 * ms, 'no', '0.46', '-5'),
+                delta(t0 + 20 * ms, t0 + 42 * ms, 'yes', '0.53', '0.1'),
+                delta(t0 + 20 * ms, t0 + 42 * ms, 'yes', '0.53', '0.2'),
+                delta(t0 + 20 * ms, t0 + 42 * ms, 'yes', '0.531', '1'),
+                delta(t0 + 30 * ms, t0 + 200 * ms, 'no', '0.45', '-7'),
+                delta(t0 + 30 * ms, t0 + 200 * ms, 'no', '0.45', '-1'),
+                delta(t0 + 30 * ms, t0 + 200 * ms, 'yes', '0.53', '-0.3'),
+                snapshot(None, t0 + 201 * ms, [('0.531', '1'), ('0.53', '10'), ('0.52', '20')], []),
+                snapshot(None, t0 + 900 * ms, [], []),
+                snapshot(midnight, midnight, [], []),
+            ],
+            schema=l2_schema,
+        )
+        trades = pl.DataFrame(
+            {
+                'timestamp': [t0 + 15 * ms, t0 + 25 * ms, t0 + 26 * ms, t0 + 15 * ms],
+                'local_timestamp': [t0 + 45 * ms, t0 + 46 * ms, t0 + 47 * ms, t0 + 45 * ms],
+                'yes_price': [Decimal('0.55'), Decimal('0.53'), Decimal('0.5'), Decimal('0.55')],
+                'count': [Decimal('2.5'), Decimal('1'), Decimal('500'), Decimal('2.5')],
+                'taker_outcome_side': ['yes', 'no', 'yes', 'yes'],
+                'is_block_trade': [False, False, True, False],
+                'trade_id': ['a', 'b', 'c', 'a'],
+            },
+            schema_overrides={
+                'timestamp': pl.Datetime('us'),
+                'local_timestamp': pl.Datetime('us'),
+                'yes_price': decimal,
+                'count': decimal,
+            },
+        )
+
+        # The first book (4 levels), 4 + 2 deltas that change a level, and the expiry (3
+        # removals): the repeated and the end-of-day book change nothing.
+        books = kalshi_to_hbt(l2)
+        self.assertEqual(len(books), 4 + 6 + 3)
+        self.assertTrue((books['ev'] & 0xff == DEPTH_EVENT).all())
+        self.assertTrue((np.diff(books['exch_ts']) >= 0).all())
+        ns = 1_000
+        # The first snapshot has no timestamp and takes the first delta's.
+        self.assertEqual((int(books['exch_ts'][0]), int(books['local_ts'][0])), ((t0 + 10 * ms) * ns, (t0 + 40 * ms) * ns))
+        # 10 + 0.1 + 0.2 - 0.3 is 10 again, so the repeated snapshot finds nothing to change.
+        self.assertEqual(books[books['px'] == 0.53]['qty'].tolist(), [10.0, 10.1, 10.3, 10.0, 0.0])
+
+        # The settlement book follows the book's last change, the expiry, by 1 ms.
+        settled = kalshi_to_hbt(l2, trade_df=trades, settle_price=1.0)
+        # (the first trade is received after deltas sent later, so its row is split in two)
+        self.assertEqual(int((settled['ev'] & EXCH_EVENT != 0).sum()), 13 + 2 + 2)
+        self.assertEqual(int(settled['exch_ts'][-1]), (t0 + 31 * ms) * ns)
+        self.assertEqual(sorted(settled['px'][-2:]), [0.998, 1.0])
+        self.assertEqual(len(kalshi_to_hbt(l2.head(0))), 0)
+        with self.assertRaises(ValueError):
+            kalshi_to_hbt(l2, settle_price=0.7)
+
+        # Buying NO is a sell; the block trade and the repeated row are dropped.
+        trade_events = settled[(settled['ev'] & 0xff == TRADE_EVENT) & (settled['ev'] & EXCH_EVENT != 0)]
+        self.assertEqual(
+            [(int(ev) & (BUY_EVENT | SELL_EVENT), px, qty) for ev, px, qty in trade_events[['ev', 'px', 'qty']]],
+            [(BUY_EVENT, 0.55, 2.5), (SELL_EVENT, 0.53, 1.0)],
+        )
+
+        hbt = ROIVectorMarketDepthBacktest(
+            [BacktestAssetKalshi().data(settled).constant_order_latency(1_000_000, 1_000_000)]
+        )
+        try:
+            self.assertEqual(hbt.elapse(100 * ms * ns), 0)  # the first five rows are in
+            self.assertEqual(sim_book(hbt, 10_000), ({0.531: 1.0, 0.53: 10.3, 0.52: 20.0}, {0.55: 6.0}))
+            for _ in range(20):
+                if hbt.elapse(1_000_000_000) != 0:
+                    break
+            else:
+                self.fail("replay did not reach the end of the data")
+            self.assertEqual((hbt.depth(0).best_bid, hbt.depth(0).best_ask), (0.998, 1.0))
+        finally:
+            hbt.close()
+
+    def test_kalshi_settle_price_reads_the_determined_message(self):
+        lifecycle = pl.DataFrame(
+            {
+                'market_ticker': ['A', 'A', 'B', 'A', None],
+                'event_type': ['market_lifecycle_v2'] * 4 + ['event_fee_update'],
+                'market_lifecycle_json': [
+                    '{"market_ticker":"A","event_type":"activated"}',
+                    '{"market_ticker":"A","result":"no","settlement_value":"0.0000","event_type":"determined"}',
+                    '{"market_ticker":"B","result":"yes","settlement_value":"1.0000","event_type":"determined"}',
+                    '{"market_ticker":"A","settled_ts":1792071006,"event_type":"settled"}',
+                    '{"event_ticker":"E","fee_type_override":"quadratic","fee_multiplier_override":1}',
+                ],
+            }
+        )
+        self.assertEqual(kalshi_settle_price(lifecycle, 'A'), 0.0)
+        self.assertEqual(kalshi_settle_price(lifecycle, 'B'), 1.0)
+        self.assertIsNone(kalshi_settle_price(lifecycle, 'C'))
 
     def test_poly_asset_record_fixes_prices_and_computes_earn(self):
         record = np.array(

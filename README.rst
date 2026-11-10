@@ -26,6 +26,7 @@ Key Features
 * Built-in Polymarket and Predict.fun fee models
 * Predict.fun order books (``predict_fun_to_hbt``, ``BacktestAssetPredictFun``)
 * Polymarket US order books and trades (``polymarket_us_to_hbt``, ``BacktestAssetPolyUS``)
+* Kalshi order books and trades (``kalshi_to_hbt``, ``BacktestAssetKalshi``)
 * Configurable queue position and latency models
 * **Free** Polymarket tick data from `pmdata.dev <https://pmdata.dev/>`_
 * Built for strategy research and exchange execution simulation
@@ -230,6 +231,7 @@ takes from the preset:
 
 * ``BacktestAssetPoly``: ``quadratic``, ``price * (1 - price)`` (Polymarket)
 * ``BacktestAssetPolyUS``: ``quadratic``, ``price * (1 - price)`` (Polymarket US)
+* ``BacktestAssetKalshi``: ``quadratic``, ``price * (1 - price)`` (Kalshi)
 * ``BacktestAssetPredictFun``: ``linear``, ``min(price, 1 - price)`` (Predict.fun)
 
 Pass ``fee_curve="linear"`` or ``"quadratic"`` to override it.
@@ -315,3 +317,50 @@ coefficient of 0.095 falling to 0.0695 as 30-day volume grows, and pays makers a
 
 Up/Down market files from before 2026-11-08 are incomplete and pmdata serves them only with
 ``?include_incomplete=true`` appended to the URL.
+
+Kalshi
+======
+
+`kacdata.com <https://kacdata.com/>`_ records Kalshi: ``kalshi/l2`` (a book snapshot followed by
+signed deltas) and ``kalshi/trades``, one file per market per UTC day, and ``kalshi/lifecycle``,
+one file per UTC day for all markets (the
+`markets catalog <https://api.kacdata.com/v1/kalshi/markets.parquet>`_ lists the tickers and
+their days). A Kalshi book holds YES bids and NO bids. ``kalshi_to_hbt`` prices it in YES (a NO
+bid at ``p`` is a YES ask at ``1 - p``), replays the L2 file in its own order, adds the trades
+by the outcome the taker bought and appends the settlement book for the settlement value in the
+lifecycle data:
+
+.. code-block:: python
+
+   from hftbacktest import BacktestAssetKalshi, kalshi_to_hbt
+   from hftbacktest.data.utils.kalshi import kalshi_settle_price
+
+   ticker = "KXMLBGAME-26OCT132000CLETB-CLE"  # Cleveland wins
+   days = ("2026/10/13", "2026/10/14")  # UTC days in order, within the catalog's record_start..record_end
+   storage_options = {"api_key": "<YOUR_KACDATA_API_KEY>"}
+
+   def read(data_type, day, name):
+       return pd.read_parquet(
+           f"https://api.kacdata.com/v1/kalshi/{data_type}/{day}/{name}.parquet",
+           storage_options=storage_options,
+       )
+
+   l2_df = pd.concat(read("l2", day, ticker) for day in days)  # keep the files' order: do not sort
+   trade_df = pd.concat(read("trades", day, ticker) for day in days)  # a trades file exists only for a day with trades
+   # the lifecycle file of the UTC day the market was determined
+   settle_price = kalshi_settle_price(read("lifecycle", days[-1], "markets_lifecycle"), ticker)
+   data = kalshi_to_hbt(l2_df, trade_df=trade_df, settle_price=settle_price)
+   asset = BacktestAssetKalshi().data(data).binary_fee_model(0.0175, 0.07)
+
+``kalshi_to_hbt(l2_df, trade_df=None, settle_price=None)`` has the shape of
+``polymarket_to_hbt``. Every day's L2 file starts with the book at the start of that day, so the
+replay can start at any day; the rows must stay in the files' order. ``settle_price`` is 1, 0,
+or 0.5; a market settled at another value is not supported, and without one the stats settle by
+the last price. Kalshi prices have four decimals, so ``BacktestAssetKalshi`` has a ``tick_size``
+of 0.0001, while a market quotes on its own tick of 0.01 or 0.001: quote on that.
+
+Kalshi charges the taker ``0.07 * contracts * price * (1 - price)`` and, in the series with
+maker fees, the maker ``0.0175 * contracts * price * (1 - price)``, both times the event's fee
+multiplier (the lifecycle data's ``event_fee_update`` messages carry an event's fee type and
+multiplier), hence the ``quadratic`` curve. Kalshi rounds an order's fees up to its balance
+precision, which is not modelled.

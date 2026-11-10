@@ -32,6 +32,7 @@ from .order import (
     MARKET,
 )
 from .recorder import Recorder
+from .data.utils.kalshi import kalshi_to_hbt
 from .data.utils.polymarket import polymarket_to_hbt
 from .data.utils.polymarket_us import polymarket_us_to_hbt
 from .data.utils.predict_fun import predict_fun_to_hbt
@@ -69,6 +70,7 @@ except:
 
 __all__ = (
     'BacktestAsset',
+    'BacktestAssetKalshi',
     'BacktestAssetPoly',
     'BacktestAssetPolyUS',
     'BacktestAssetPredictFun',
@@ -117,6 +119,7 @@ __all__ = (
     'LIMIT',
     'MARKET',
 
+    'kalshi_to_hbt',
     'polymarket_to_hbt',
     'polymarket_us_to_hbt',
     'predict_fun_to_hbt',
@@ -251,6 +254,24 @@ class BacktestAssetPolyUS(BacktestAssetPoly):
     volume tier, and pays makers a rebate of up to 0.0104 on the same curve, so
     ``binary_fee_model(0.0, 0.095)`` is the schedule of an account in the lowest tiers
     (https://docs.polymarket.us/fees).
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.tick_size(0.0001)
+
+
+class BacktestAssetKalshi(BacktestAssetPoly):
+    """
+    BacktestAsset preset for Kalshi data (``kalshi_to_hbt``).
+
+    The fixed settings of ``BacktestAssetPoly`` on a 0.0001 price grid, the precision of Kalshi
+    prices (a market's own tick is 0.01 or 0.001). The fee curve is ``quadratic`` as well:
+    Kalshi charges the taker ``0.07 * contracts * price * (1 - price)`` and, in the series with
+    maker fees, the maker ``0.0175 * contracts * price * (1 - price)``, both times the event's
+    fee multiplier, so ``binary_fee_model(0.0, 0.07)`` or ``binary_fee_model(0.0175, 0.07)`` is
+    the schedule. Kalshi rounds an order's fees up to its balance precision, which is not
+    modelled.
     """
 
     def __init__(self):
