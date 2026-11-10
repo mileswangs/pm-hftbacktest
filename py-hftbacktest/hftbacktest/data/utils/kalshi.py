@@ -160,8 +160,10 @@ def kalshi_to_hbt(
     r"""
     Converts Kalshi L2 books and trades into an HftBacktest event array; the counterpart of
     ``polymarket_to_hbt``, priced in YES. The L2 rows are replayed in the order given, which
-    must be the files': concatenate days in order and do not sort them. A day's file starts
-    with the book at the start of the day, so the replay can start at any day.
+    must be the files': concatenate days in order and do not sort them. A delta is an increment
+    to the book before it, so the rows must also start where a file starts: a day's file opens
+    with the book at the start of the day, and a slice that starts later has no book to add
+    its deltas to. The replay can therefore start at any day, but not within one.
 
     Args:
         l2_df: DataFrame of kacdata ``kalshi/l2`` rows: ``timestamp``, ``local_timestamp``,

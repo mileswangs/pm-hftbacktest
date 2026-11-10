@@ -353,8 +353,10 @@ lifecycle data:
    asset = BacktestAssetKalshi().data(data).binary_fee_model(0.0175, 0.07)
 
 ``kalshi_to_hbt(l2_df, trade_df=None, settle_price=None)`` has the shape of
-``polymarket_to_hbt``. Every day's L2 file starts with the book at the start of that day, so the
-replay can start at any day; the rows must stay in the files' order. ``settle_price`` is 1, 0,
+``polymarket_to_hbt``. The deltas are increments to the book before them, not new sizes, so the
+rows must stay in the files' order and start where a file starts: every day's L2 file opens with
+the book at the start of that day, so the replay can start at any day but not within one (a
+slice that starts later has no book to add its deltas to). ``settle_price`` is 1, 0,
 or 0.5; a market settled at another value is not supported, and without one the stats settle by
 the last price. Kalshi prices have four decimals, so ``BacktestAssetKalshi`` has a ``tick_size``
 of 0.0001, while a market quotes on its own tick of 0.01 or 0.001: quote on that.
