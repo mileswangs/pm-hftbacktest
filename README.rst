@@ -25,6 +25,7 @@ Key Features
 * Fast execution with `Numba <https://numba.pydata.org/>`_ JIT and Rust
 * Built-in Polymarket and Predict.fun fee models
 * Predict.fun order books (``predict_fun_to_hbt``, ``BacktestAssetPredictFun``)
+* Polymarket US order books and trades (``polymarket_us_to_hbt``, ``BacktestAssetPolyUS``)
 * Configurable queue position and latency models
 * **Free** Polymarket tick data from `pmdata.dev <https://pmdata.dev/>`_
 * Built for strategy research and exchange execution simulation
@@ -228,6 +229,7 @@ Fee curves
 takes from the preset:
 
 * ``BacktestAssetPoly``: ``quadratic``, ``price * (1 - price)`` (Polymarket)
+* ``BacktestAssetPolyUS``: ``quadratic``, ``price * (1 - price)`` (Polymarket US)
 * ``BacktestAssetPredictFun``: ``linear``, ``min(price, 1 - price)`` (Predict.fun)
 
 Pass ``fee_curve="linear"`` or ``"quadratic"`` to override it.
@@ -263,3 +265,53 @@ REST API, ``GET /v1/markets/{id}``):
 resolution (Polymarket's does, so there it is optional; without one the stats settle by the last
 price). ``BinaryAssetRecord`` (``PolyAssetRecord`` is the same class)
 computes the stats for both.
+
+Polymarket US
+=============
+
+pmdata.dev also records Polymarket US (polymarket.us): ``polymarket_us/l2`` (one complete book
+per row) and ``polymarket_us/trades``, one file per market per UTC day, both priced in the
+market's long outcome (``yes_outcome`` in the
+`markets catalog <https://public-data.pmdata.dev/v1/polymarket_us/markets.parquet>`_).
+``polymarket_us_to_hbt`` turns the books into depth deltas, adds the trades by the taker's side
+and appends the settlement book once you know the winner (the Polymarket US API, no key
+needed):
+
+.. code-block:: python
+
+   import requests
+   from hftbacktest import BacktestAssetPolyUS, polymarket_us_to_hbt
+
+   slug = "aec-nfl-pit-cle-2026-10-01"  # Steelers (the long outcome) at Browns
+   days = ("2026/10/01", "2026/10/02")  # the UTC days to replay, within the catalog's record_start..record_end
+
+   def read(data_type):
+       return pd.concat(
+           pd.read_parquet(
+               f"https://api.pmdata.dev/v1/polymarket_us/{data_type}/{day}/{slug}.parquet",
+               storage_options=storage_options,
+           )
+           for day in days
+       )
+
+   l2_df, trade_df = read("l2"), read("trades")  # a trades file exists only for a day with trades
+   settlement = requests.get(f"https://gateway.polymarket.us/v1/markets/{slug}/settlement").json()
+   data = polymarket_us_to_hbt(l2_df, trade_df=trade_df, settle_price=float(settlement["settlement"]))
+   asset = BacktestAssetPolyUS().data(data).binary_fee_model(0.0, 0.095)
+
+``polymarket_us_to_hbt(l2_df, trade_df=None, settle_price=None)`` has the shape of
+``polymarket_to_hbt``. ``settle_price`` (1, 0, or 0.5 for a tie) must be given because the
+Polymarket US data carries no resolution; without one the stats settle by the last price. The
+market ``state`` column (open, halted, closed, ...) is not modelled: a halted market's book is
+replayed as it was sent. A Polymarket US market quotes on its own tick of 0.01, 0.005 or 0.0025
+(``orderPriceMinTickSize`` of ``GET https://gateway.polymarket.us/v1/market/slug/{slug}``), so
+``BacktestAssetPolyUS`` has a ``tick_size`` of 0.0001 where ``BacktestAssetPoly`` has 0.001:
+quote on the market's tick, not the preset's.
+
+Polymarket US charges the taker ``coefficient * contracts * price * (1 - price)``, with a
+coefficient of 0.095 falling to 0.0695 as 30-day volume grows, and pays makers a rebate of up to
+0.0104 on the same curve (`fee schedule <https://docs.polymarket.us/fees>`_, as of November
+2026), hence the ``quadratic`` curve and ``binary_fee_model(0.0, 0.095)`` above.
+
+Up/Down market files from before 2026-11-08 are incomplete and pmdata serves them only with
+``?include_incomplete=true`` appended to the URL.

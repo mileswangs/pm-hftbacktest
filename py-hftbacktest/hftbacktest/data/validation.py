@@ -5,6 +5,10 @@ from numba import njit
 from numpy.typing import NDArray
 
 from ..types import (
+    DEPTH_BBO_EVENT,
+    DEPTH_CLEAR_EVENT,
+    DEPTH_EVENT,
+    DEPTH_SNAPSHOT_EVENT,
     EXCH_EVENT,
     LOCAL_EVENT,
     event_dtype,
@@ -47,6 +51,31 @@ def correct_local_timestamp(data: EVENT_ARRAY, base_latency: float) -> EVENT_ARR
         for row_num in range(len(data)):
             data[row_num].local_ts += local_timestamp_offset
 
+    return data
+
+
+def correct_local_depth_order(data: EVENT_ARRAY) -> EVENT_ARRAY:
+    """
+    Adjusts the local timestamp `in place` so that the depth events are received in the order the exchange sent them.
+
+    The local side applies depth events in the order of their local timestamps, but they only add up to the right
+    book in the order of their exchange timestamps. A depth event received after one that the exchange sent later,
+    as happens in a feed recorded over more than one connection, is stale on arrival: it takes the local timestamp
+    of that later event, so the local book is always that of the latest-sent event received. Trades are left as
+    received.
+
+    Args:
+        data: Data to be corrected, sorted by exchange timestamp.
+
+    Returns:
+        Data with the corrected timestamps.
+    """
+    depth = np.isin(
+        data['ev'] & 0xff,
+        (DEPTH_EVENT, DEPTH_CLEAR_EVENT, DEPTH_SNAPSHOT_EVENT, DEPTH_BBO_EVENT)
+    )
+    local_ts = data['local_ts'][depth]
+    data['local_ts'][depth] = np.minimum.accumulate(local_ts[::-1])[::-1]
     return data
 
 

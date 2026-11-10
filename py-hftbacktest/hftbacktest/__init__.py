@@ -33,6 +33,7 @@ from .order import (
 )
 from .recorder import Recorder
 from .data.utils.polymarket import polymarket_to_hbt
+from .data.utils.polymarket_us import polymarket_us_to_hbt
 from .data.utils.predict_fun import predict_fun_to_hbt
 from .types import (
     ALL_ASSETS,
@@ -69,6 +70,7 @@ except:
 __all__ = (
     'BacktestAsset',
     'BacktestAssetPoly',
+    'BacktestAssetPolyUS',
     'BacktestAssetPredictFun',
     'init_orderbook',
     'HashMapMarketDepthBacktest',
@@ -116,6 +118,7 @@ __all__ = (
     'MARKET',
 
     'polymarket_to_hbt',
+    'polymarket_us_to_hbt',
     'predict_fun_to_hbt',
 
     'Recorder'
@@ -235,6 +238,24 @@ class BacktestAssetPoly(BacktestAsset):
         self.last_trades_capacity(0)
         self.roi_lb(0.0)
         self.roi_ub(1.0)
+
+
+class BacktestAssetPolyUS(BacktestAssetPoly):
+    """
+    BacktestAsset preset for Polymarket US data (``polymarket_us_to_hbt``).
+
+    The fixed settings of ``BacktestAssetPoly`` on a 0.0001 price grid: a Polymarket US market
+    quotes on its own tick of 0.01, 0.005 or 0.0025, which a 0.001 grid cannot hold. The fee
+    curve is ``quadratic`` as well: Polymarket US charges the taker
+    ``coefficient * contracts * price * (1 - price)``, the coefficient being 0.0695 to 0.095 by
+    volume tier, and pays makers a rebate of up to 0.0104 on the same curve, so
+    ``binary_fee_model(0.0, 0.095)`` is the schedule of an account in the lowest tiers
+    (https://docs.polymarket.us/fees).
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.tick_size(0.0001)
 
 
 class BacktestAssetPredictFun(BacktestAsset):

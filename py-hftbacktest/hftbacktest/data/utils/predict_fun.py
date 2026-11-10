@@ -15,8 +15,7 @@ import polars as pl
 from numpy.typing import NDArray
 
 from ...types import BUY_EVENT, DEPTH_EVENT, SELL_EVENT, event_dtype
-from ..validation import correct_event_order
-from .polymarket import _local_ts_ns_expr, _ts_ns_expr, check_settle_price
+from .polymarket import _local_ts_ns_expr, _to_event_array, _ts_ns_expr, check_settle_price
 
 # The grid on which two books' levels are matched (prices are quoted on a coarser one); it is
 # an internal key, not the asset's tick size.
@@ -32,12 +31,12 @@ SETTLE_BOOKS = {
 }
 
 
-def _levels(prices: Any, sizes: Any) -> dict[int, float]:
+def _levels(prices: Any, sizes: Any, grid: float = LEVEL_GRID) -> dict[int, float]:
     """A side as ``grid step -> size`` (empty levels dropped)."""
     prices = np.asarray([] if prices is None else prices, dtype=np.float64)
     sizes = np.asarray([] if sizes is None else sizes, dtype=np.float64)
     n = min(len(prices), len(sizes))
-    steps = np.rint(prices[:n] / LEVEL_GRID).astype(np.int64)
+    steps = np.rint(prices[:n] / grid).astype(np.int64)
     return {int(t): float(q) for t, q in zip(steps, sizes[:n]) if q > 0.0}
 
 
@@ -47,6 +46,7 @@ def _delta_events(
     side: int,
     previous: dict[int, float],
     current: dict[int, float],
+    grid: float = LEVEL_GRID,
 ) -> NDArray:
     """The depth events that turn ``previous`` into ``current``: removed and shrunk levels
     first, then new and grown ones, so the simulated book never crosses on the way."""
@@ -56,7 +56,7 @@ def _delta_events(
     out = np.zeros(len(changes), dtype=event_dtype)
     if changes:
         out["ev"] = DEPTH_EVENT | side
-        out["px"] = np.asarray([t * LEVEL_GRID for t, _ in changes])
+        out["px"] = np.asarray([t * grid for t, _ in changes])
         out["qty"] = np.asarray([q for _, q in changes])
         out["exch_ts"] = ts
         out["local_ts"] = local_ts
@@ -74,6 +74,45 @@ def normalize_predict_fun_l2(l2_df: Any) -> pl.DataFrame:
     return df.sort(["ts", "local_ts"], maintain_order=True).unique(
         subset=["ts"], keep="first", maintain_order=True
     )
+
+
+def _book_delta_events(
+    df: pl.DataFrame,
+    settle_price: float | None,
+    grid: float = LEVEL_GRID,
+) -> NDArray:
+    """The depth events that replay ``df``'s books (one complete book per row, with ``ts`` /
+    ``local_ts`` in nanoseconds, in replay order) as per-level deltas, followed by the
+    settlement book 1 ms after the last one when ``settle_price`` is given. Levels are matched
+    on ``grid``."""
+    bids: dict[int, float] = {}
+    asks: dict[int, float] = {}
+    parts: list[NDArray] = []
+
+    def book(ts: int, local_ts: int, bid_prices, bid_sizes, ask_prices, ask_sizes) -> None:
+        nonlocal bids, asks
+        new_bids = _levels(bid_prices, bid_sizes, grid)
+        new_asks = _levels(ask_prices, ask_sizes, grid)
+        parts.append(_delta_events(ts, local_ts, BUY_EVENT, bids, new_bids, grid))
+        parts.append(_delta_events(ts, local_ts, SELL_EVENT, asks, new_asks, grid))
+        bids, asks = new_bids, new_asks
+
+    rows = zip(
+        df["ts"].to_list(),
+        df["local_ts"].to_list(),
+        df["bid_prices"].to_list(),
+        df["bid_sizes"].to_list(),
+        df["ask_prices"].to_list(),
+        df["ask_sizes"].to_list(),
+    )
+    for ts, local_ts, bid_prices, bid_sizes, ask_prices, ask_sizes in rows:
+        book(int(ts), int(local_ts), bid_prices, bid_sizes, ask_prices, ask_sizes)
+    if settle_price is not None:
+        last_ts = int(df["ts"][-1]) + SETTLE_TS_OFFSET_NS
+        last_local_ts = int(df["local_ts"][-1]) + SETTLE_TS_OFFSET_NS
+        book(last_ts, last_local_ts, *SETTLE_BOOKS[settle_price])
+
+    return np.concatenate(parts)
 
 
 def predict_fun_to_hbt(
@@ -110,39 +149,4 @@ def predict_fun_to_hbt(
     if df.is_empty():
         return np.zeros(0, dtype=event_dtype)
 
-    bids: dict[int, float] = {}
-    asks: dict[int, float] = {}
-    parts: list[NDArray] = []
-
-    def book(ts: int, local_ts: int, bid_prices, bid_sizes, ask_prices, ask_sizes) -> None:
-        nonlocal bids, asks
-        new_bids = _levels(bid_prices, bid_sizes)
-        new_asks = _levels(ask_prices, ask_sizes)
-        parts.append(_delta_events(ts, local_ts, BUY_EVENT, bids, new_bids))
-        parts.append(_delta_events(ts, local_ts, SELL_EVENT, asks, new_asks))
-        bids, asks = new_bids, new_asks
-
-    rows = zip(
-        df["ts"].to_list(),
-        df["local_ts"].to_list(),
-        df["bid_prices"].to_list(),
-        df["bid_sizes"].to_list(),
-        df["ask_prices"].to_list(),
-        df["ask_sizes"].to_list(),
-    )
-    for ts, local_ts, bid_prices, bid_sizes, ask_prices, ask_sizes in rows:
-        book(int(ts), int(local_ts), bid_prices, bid_sizes, ask_prices, ask_sizes)
-    if settle_price is not None:
-        last_ts = int(df["ts"][-1]) + SETTLE_TS_OFFSET_NS
-        last_local_ts = int(df["local_ts"][-1]) + SETTLE_TS_OFFSET_NS
-        book(last_ts, last_local_ts, *SETTLE_BOOKS[settle_price])
-
-    data = np.concatenate(parts)
-    if len(data) == 0:
-        return data
-    data = data[np.argsort(data["exch_ts"], kind="mergesort")]
-    return correct_event_order(
-        data,
-        np.argsort(data["exch_ts"], kind="mergesort"),
-        np.argsort(data["local_ts"], kind="mergesort"),
-    )
+    return _to_event_array([_book_delta_events(df, settle_price)])

@@ -12,7 +12,7 @@ from ...types import (
     TRADE_EVENT,
     event_dtype,
 )
-from ..validation import correct_event_order
+from ..validation import correct_event_order, correct_local_depth_order
 
 DEFAULT_LATENCY_NS = 20_000_000
 HBT_COLS = ["ev", "exch_ts", "local_ts", "px", "qty", "order_id", "ival", "fval"]
@@ -241,6 +241,22 @@ def _make_trade_events_from_normalized(
     return _copy_structured(arr)
 
 
+def _to_event_array(parts: list[NDArray]) -> NDArray:
+    """The converters' events as one array in the backtester's order: sorted by exchange
+    timestamp (stably, so ``parts`` decides the order within one), the depth events received in
+    the order sent (``correct_local_depth_order``), and the rows whose local order still
+    differs split in two (``correct_event_order``)."""
+    data = np.concatenate(parts) if parts else np.zeros(0, dtype=event_dtype)
+    if len(data) == 0:
+        return data
+    data = correct_local_depth_order(data[np.argsort(data["exch_ts"], kind="mergesort")])
+    return correct_event_order(
+        data,
+        np.argsort(data["exch_ts"], kind="mergesort"),
+        np.argsort(data["local_ts"], kind="mergesort"),
+    )
+
+
 def polymarket_to_hbt(
     l2_df: Any,
     trade_df: Any | None = None,
@@ -309,13 +325,4 @@ def polymarket_to_hbt(
         if len(trade_events) > 0:
             parts.append(trade_events)
 
-    if not parts:
-        return np.zeros(0, dtype=event_dtype)
-
-    data = np.concatenate(parts)
-    data = data[np.argsort(data["exch_ts"], kind="mergesort")]
-    return correct_event_order(
-        data,
-        np.argsort(data["exch_ts"], kind="mergesort"),
-        np.argsort(data["local_ts"], kind="mergesort"),
-    )
+    return _to_event_array(parts)
