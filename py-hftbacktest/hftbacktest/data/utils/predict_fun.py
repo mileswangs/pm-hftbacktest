@@ -106,7 +106,10 @@ def _book_delta_events(
 
     rows = zip(
         df["ts"].to_list(),
-        df["local_ts"].to_list(),
+        # A book received after a later-sent one is stale on arrival and takes effect with that
+        # one (``correct_local_depth_order``). It is done here, on the books: a book that
+        # repeats the one before it has no events to carry its receive time.
+        df["local_ts"].cum_min(reverse=True).to_list(),
         df["bid_prices"].to_list(),
         df["bid_sizes"].to_list(),
         df["ask_prices"].to_list(),
