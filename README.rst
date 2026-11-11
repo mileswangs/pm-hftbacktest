@@ -23,13 +23,7 @@ Key Features
 
 * Tick-level Polymarket backtesting
 * Fast execution with `Numba <https://numba.pydata.org/>`_ JIT and Rust
-* Built-in Polymarket and Predict.fun fee models
-* Predict.fun order books (``predict_fun_to_hbt``, ``BacktestAssetPredictFun``)
-* Polymarket US order books and trades (``polymarket_us_to_hbt``, ``BacktestAssetPolyUS``)
-* Kalshi order books and trades (``kalshi_to_hbt``, ``BacktestAssetKalshi``)
-* Configurable queue position and latency models
-* **Free** Polymarket tick data from `pmdata.dev <https://pmdata.dev/>`_
-* Built for strategy research and exchange execution simulation
+* Supports Polymarket, Polymarket US, Predict.fun and Kalshi, each with its fee model
 * Compatible with the hftbacktest ecosystem
 
 Quick Start
