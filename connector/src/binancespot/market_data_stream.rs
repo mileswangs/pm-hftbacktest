@@ -66,9 +66,7 @@ impl MarketDataStream {
         match stream {
             MarketEventStream::DepthUpdate(data) => {
                 let prev_u_val = self.prev_u.get_mut(&data.symbol);
-                if prev_u_val.is_none()
-                /* fixme: || data.prev_update_id != **prev_u_val.as_ref().unwrap()*/
-                {
+                if prev_u_val.is_none() || is_gap(**prev_u_val.as_ref().unwrap(), &data) {
                     // if !pending_depth_messages.contains_key(&data.symbol) {
                     let client_ = self.client.clone();
                     let symbol = data.symbol.clone();
@@ -334,5 +332,47 @@ impl MarketDataStream {
                 }
             }
         }
+    }
+}
+
+/// Whether `data` does not continue the stream after the event whose `u` was `prev_u`.
+fn is_gap(prev_u: i64, data: &stream::Depth) -> bool {
+    let update = crypto_orderbook::ws::binance::DepthUpdate {
+        first_update_id: data.first_update_id as u64,
+        last_update_id: data.last_update_id as u64,
+        prev_last_update_id: None,
+        bids: Vec::new(),
+        asks: Vec::new(),
+    };
+    matches!(
+        crypto_orderbook::orderbook::sync::live(
+            crypto_orderbook::Market::Spot,
+            prev_u as u64,
+            &update
+        ),
+        crypto_orderbook::orderbook::sync::Live::Gap { .. }
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn depth(first: i64, last: i64) -> stream::Depth {
+        stream::Depth {
+            event_time: 0,
+            symbol: "btcusdt".to_string(),
+            first_update_id: first,
+            last_update_id: last,
+            bids: Vec::new(),
+            asks: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn detects_dropped_frame() {
+        assert!(!is_gap(100, &depth(101, 110)));
+        // Updates 101..=105 were dropped.
+        assert!(is_gap(100, &depth(106, 110)));
     }
 }
